@@ -19,10 +19,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hanchuanchuan/goInception/ast"
 	"github.com/hanchuanchuan/goInception/domain"
 	"github.com/hanchuanchuan/goInception/kv"
 	"github.com/hanchuanchuan/goInception/store/mockstore"
+	"github.com/hanchuanchuan/goInception/util/sqlexec"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
@@ -83,7 +83,7 @@ func prepareJoinBenchData(se Session, colType string, valueFormat string, valueC
 	mustExecute(se, "commit")
 }
 
-func readResult(ctx context.Context, rs ast.RecordSet, count int) {
+func readResult(ctx context.Context, rs sqlexec.RecordSet, count int) {
 	chk := rs.NewChunk()
 	for count > 0 {
 		err := rs.Next(ctx, chk)

@@ -11,6 +11,7 @@ import (
 	json "github.com/CorgiMan/json2"
 	"github.com/hanchuanchuan/goInception/ast"
 	"github.com/hanchuanchuan/goInception/model"
+	parserDriver "github.com/hanchuanchuan/goInception/types/parser_driver"
 	"github.com/hanchuanchuan/goInception/util/sqlexec"
 	log "github.com/sirupsen/logrus"
 )
@@ -135,8 +136,8 @@ func printItem(expr ast.ExprNode) interface{} {
 	// 	}
 	// 	return field
 
-	case *ast.ValueExpr:
-		v := e.GetDatum().GetValue()
+	case *parserDriver.ValueExpr:
+		v := e.GetDatumString()
 		value := make(map[string]string, 2)
 		value["type"] = fmt.Sprintf("%T", v)
 		value["value"] = fmt.Sprint(v)

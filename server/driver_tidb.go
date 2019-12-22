@@ -28,6 +28,7 @@ import (
 	"github.com/hanchuanchuan/goInception/util"
 	"github.com/hanchuanchuan/goInception/util/auth"
 	"github.com/hanchuanchuan/goInception/util/chunk"
+	"github.com/hanchuanchuan/goInception/util/sqlexec"
 	"github.com/pingcap/errors"
 	"golang.org/x/net/context"
 )
@@ -366,7 +367,7 @@ func (tc *TiDBContext) GetSessionVars() *variable.SessionVars {
 }
 
 type tidbResultSet struct {
-	recordSet ast.RecordSet
+	recordSet sqlexec.RecordSet
 	columns   []*ColumnInfo
 	rows      []chunk.Row
 	closed    bool

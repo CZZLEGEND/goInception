@@ -89,6 +89,8 @@ const (
 	preferRightAsIndexOuter
 	preferHashJoin
 	preferMergeJoin
+	preferHashAgg
+	preferStreamAgg
 )
 
 // LogicalJoin is the logical join plan.

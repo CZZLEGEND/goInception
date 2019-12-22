@@ -26,6 +26,7 @@ import (
 	"github.com/hanchuanchuan/goInception/privilege"
 	"github.com/hanchuanchuan/goInception/sessionctx"
 	"github.com/hanchuanchuan/goInception/types"
+	driver "github.com/hanchuanchuan/goInception/types/parser_driver"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tipb/go-tipb"
 )
@@ -148,8 +149,7 @@ func tryPointGetPlan(ctx sessionctx.Context, selStmt *ast.SelectStmt) *PointGetP
 	if selStmt.Having != nil || selStmt.LockTp != ast.SelectLockNone {
 		return nil
 	} else if selStmt.Limit != nil {
-		sc := ctx.GetSessionVars().StmtCtx
-		count, offset, err := extractLimitCountOffset(sc, selStmt.Limit)
+		count, offset, err := extractLimitCountOffset(ctx, selStmt.Limit)
 		if err != nil || count == 0 || offset > 0 {
 			return nil
 		}
@@ -336,9 +336,9 @@ func getNameValuePairs(nvPairs []nameValuePair, expr ast.ExprNode) []nameValuePa
 		}
 		var d types.Datum
 		switch x := binOp.R.(type) {
-		case *ast.ValueExpr:
+		case *driver.ValueExpr:
 			d = x.Datum
-		case *ast.ParamMarkerExpr:
+		case *driver.ParamMarkerExpr:
 			d = x.Datum
 		}
 		if d.IsNull() {

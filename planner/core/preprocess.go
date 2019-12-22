@@ -25,6 +25,7 @@ import (
 	"github.com/hanchuanchuan/goInception/parser"
 	"github.com/hanchuanchuan/goInception/sessionctx"
 	"github.com/hanchuanchuan/goInception/types"
+	driver "github.com/hanchuanchuan/goInception/types/parser_driver"
 	"github.com/hanchuanchuan/goInception/util/charset"
 	"github.com/pingcap/errors"
 )
@@ -95,7 +96,7 @@ func (p *preprocessor) Leave(in ast.Node) (out ast.Node, ok bool) {
 		p.checkContainDotColumn(x)
 	case *ast.DropTableStmt, *ast.AlterTableStmt, *ast.RenameTableStmt:
 		p.inCreateOrDropTable = false
-	case *ast.ParamMarkerExpr:
+	case *driver.ParamMarkerExpr:
 		if !p.inPrepare {
 			p.err = parser.ErrSyntax.GenWithStack("syntax error, unexpected '?'")
 			return
@@ -134,14 +135,20 @@ func checkAutoIncrementOp(colDef *ast.ColumnDef, num int) (bool, error) {
 			return hasAutoIncrement, nil
 		}
 		for _, op := range colDef.Options[num+1:] {
-			if op.Tp == ast.ColumnOptionDefaultValue && !op.Expr.GetDatum().IsNull() {
-				return hasAutoIncrement, errors.Errorf("Invalid default value for '%s'", colDef.Name.Name.O)
+			if op.Tp == ast.ColumnOptionDefaultValue {
+				if tmp, ok := op.Expr.(*driver.ValueExpr); ok {
+					if !tmp.Datum.IsNull() {
+						return hasAutoIncrement, errors.Errorf("Invalid default value for '%s'", colDef.Name.Name.O)
+					}
+				}
 			}
 		}
 	}
 	if colDef.Options[num].Tp == ast.ColumnOptionDefaultValue && len(colDef.Options) != num+1 {
-		if colDef.Options[num].Expr.GetDatum().IsNull() {
-			return hasAutoIncrement, nil
+		if tmp, ok := colDef.Options[num].Expr.(*driver.ValueExpr); ok {
+			if tmp.Datum.IsNull() {
+				return hasAutoIncrement, nil
+			}
 		}
 		for _, op := range colDef.Options[num+1:] {
 			if op.Tp == ast.ColumnOptionAutoIncrement {

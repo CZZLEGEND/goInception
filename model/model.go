@@ -21,11 +21,12 @@ import (
 
 	"github.com/hanchuanchuan/goInception/mysql"
 	"github.com/hanchuanchuan/goInception/types"
-	"github.com/hanchuanchuan/goInception/util/hack"
+	"github.com/hanchuanchuan/goInception/util/auth"
 	"github.com/pingcap/errors" // SchemaState is the state for schema elements.
 	"github.com/pingcap/tipb/go-tipb"
 )
 
+// SchemaState is the state for schema elements.
 type SchemaState byte
 
 const (
@@ -62,6 +63,22 @@ func (s SchemaState) String() string {
 	}
 }
 
+const (
+	// ColumnInfoVersion0 means the column info version is 0.
+	ColumnInfoVersion0 = uint64(0)
+	// ColumnInfoVersion1 means the column info version is 1.
+	ColumnInfoVersion1 = uint64(1)
+	// ColumnInfoVersion2 means the column info version is 2.
+	// This is for v2.1.7 to Compatible with older versions charset problem.
+	// Old version such as v2.0.8 treat utf8 as utf8mb4, because there is no UTF8 check in v2.0.8.
+	// After version V2.1.2 (PR#8738) , TiDB add UTF8 check, then the user upgrade from v2.0.8 insert some UTF8MB4 characters will got error.
+	// This is not compatibility for user. Then we try to fix this in PR #9820, and increase the version number.
+	ColumnInfoVersion2 = uint64(2)
+
+	// CurrLatestColumnInfoVersion means the latest column info in the current TiDB.
+	CurrLatestColumnInfoVersion = ColumnInfoVersion2
+)
+
 // ColumnInfo provides meta data describing of a table column.
 type ColumnInfo struct {
 	ID                  int64               `json:"id"`
@@ -76,6 +93,12 @@ type ColumnInfo struct {
 	types.FieldType     `json:"type"`
 	State               SchemaState `json:"state"`
 	Comment             string      `json:"comment"`
+	// Version means the version of the column info.
+	// Version = 0: For OriginDefaultValue and DefaultValue of timestamp column will stores the default time in system time zone.
+	//              That is a bug if multiple TiDB servers in different system time zone.
+	// Version = 1: For OriginDefaultValue and DefaultValue of timestamp column will stores the default time in UTC time zone.
+	//              This will fix bug in version 0. For compatibility with version 0, we add version field in column info struct.
+	Version uint64 `json:"version"`
 }
 
 // Clone clones ColumnInfo.
@@ -113,9 +136,21 @@ func (c *ColumnInfo) SetDefaultValue(value interface{}) error {
 // bit type default value will store in DefaultValueBit for fix bit default value decode/encode bug.
 func (c *ColumnInfo) GetDefaultValue() interface{} {
 	if c.Tp == mysql.TypeBit && c.DefaultValueBit != nil {
-		return hack.String(c.DefaultValueBit)
+		return string(c.DefaultValueBit)
 	}
 	return c.DefaultValue
+}
+
+// GetTypeDesc gets the description for column type.
+func (c *ColumnInfo) GetTypeDesc() string {
+	desc := c.FieldType.CompactStr()
+	if mysql.HasUnsignedFlag(c.Flag) && c.Tp != mysql.TypeBit && c.Tp != mysql.TypeYear {
+		desc += " unsigned"
+	}
+	if mysql.HasZerofillFlag(c.Flag) && c.Tp != mysql.TypeYear {
+		desc += " zerofill"
+	}
+	return desc
 }
 
 // FindColumnInfo finds ColumnInfo in cols by name.
@@ -133,6 +168,36 @@ func FindColumnInfo(cols []*ColumnInfo, name string) *ColumnInfo {
 // ExtraHandleID is the column ID of column which we need to append to schema to occupy the handle's position
 // for use of execution phase.
 const ExtraHandleID = -1
+
+const (
+	// TableInfoVersion0 means the table info version is 0.
+	// Upgrade from v2.1.1 or v2.1.2 to v2.1.3 and later, and then execute a "change/modify column" statement
+	// that does not specify a charset value for column. Then the following error may be reported:
+	// ERROR 1105 (HY000): unsupported modify charset from utf8mb4 to utf8.
+	// To eliminate this error, we will not modify the charset of this column
+	// when executing a change/modify column statement that does not specify a charset value for column.
+	// This behavior is not compatible with MySQL.
+	TableInfoVersion0 = uint16(0)
+	// TableInfoVersion1 means the table info version is 1.
+	// When we execute a change/modify column statement that does not specify a charset value for column,
+	// we set the charset of this column to the charset of table. This behavior is compatible with MySQL.
+	TableInfoVersion1 = uint16(1)
+	// TableInfoVersion2 means the table info version is 2.
+	// This is for v2.1.7 to Compatible with older versions charset problem.
+	// Old version such as v2.0.8 treat utf8 as utf8mb4, because there is no UTF8 check in v2.0.8.
+	// After version V2.1.2 (PR#8738) , TiDB add UTF8 check, then the user upgrade from v2.0.8 insert some UTF8MB4 characters will got error.
+	// This is not compatibility for user. Then we try to fix this in PR #9820, and increase the version number.
+	TableInfoVersion2 = uint16(2)
+	// TableInfoVersion3 means the table info version is 3.
+	// This version aims to deal with upper-cased charset name in TableInfo stored by versions prior to TiDB v2.1.9:
+	// TiDB always suppose all charsets / collations as lower-cased and try to convert them if they're not.
+	// However, the convert is missed in some scenarios before v2.1.9, so for all those tables prior to TableInfoVersion3, their
+	// charsets / collations will be converted to lower-case while loading from the storage.
+	TableInfoVersion3 = uint16(3)
+
+	// CurrLatestTableInfoVersion means the latest table info in the current TiDB.
+	CurrLatestTableInfoVersion = TableInfoVersion3
+)
 
 // ExtraHandleName is the name of ExtraHandle Column.
 var ExtraHandleName = NewCIStr("_tidb_rowid")
@@ -166,10 +231,21 @@ type TableInfo struct {
 
 	// ShardRowIDBits specify if the implicit row ID is sharded.
 	ShardRowIDBits uint64
+	// MaxShardRowIDBits uses to record the max ShardRowIDBits be used so far.
+	MaxShardRowIDBits uint64 `json:"max_shard_row_id_bits"`
+	// PreSplitRegions specify the pre-split region when create table.
+	// The pre-split region num is 2^(PreSplitRegions-1).
+	// And the PreSplitRegions should less than or equal to ShardRowIDBits.
+	PreSplitRegions uint64 `json:"pre_split_regions"`
 
 	Partition *PartitionInfo `json:"partition"`
 
 	Compression string `json:"compression"`
+
+	View *ViewInfo `json:"view"`
+
+	// Version means the version of the table info.
+	Version uint16 `json:"version"`
 }
 
 // GetPartitionInfo returns the partition information.
@@ -239,6 +315,23 @@ func (t *TableInfo) GetPkColInfo() *ColumnInfo {
 	return nil
 }
 
+func (t *TableInfo) GetAutoIncrementColInfo() *ColumnInfo {
+	for _, colInfo := range t.Columns {
+		if mysql.HasAutoIncrementFlag(colInfo.Flag) {
+			return colInfo
+		}
+	}
+	return nil
+}
+
+func (t *TableInfo) IsAutoIncColUnsigned() bool {
+	col := t.GetAutoIncrementColInfo()
+	if col == nil {
+		return false
+	}
+	return mysql.HasUnsignedFlag(col.Flag)
+}
+
 // Cols returns the columns of the table in public state.
 func (t *TableInfo) Cols() []*ColumnInfo {
 	publicColumns := make([]*ColumnInfo, len(t.Columns))
@@ -253,6 +346,16 @@ func (t *TableInfo) Cols() []*ColumnInfo {
 		}
 	}
 	return publicColumns[0 : maxOffset+1]
+}
+
+// FindIndexByName finds index by name.
+func (t *TableInfo) FindIndexByName(idxName string) *IndexInfo {
+	for _, idx := range t.Indices {
+		if idx.Name.L == idxName {
+			return idx
+		}
+	}
+	return nil
 }
 
 // NewExtraHandleColInfo mocks a column info for extra handle column.
@@ -277,6 +380,84 @@ func (t *TableInfo) ColumnIsInIndex(c *ColumnInfo) bool {
 		}
 	}
 	return false
+}
+
+// IsView checks if tableinfo is a view
+func (t *TableInfo) IsView() bool {
+	return t.View != nil
+}
+
+// ViewAlgorithm is VIEW's SQL AlGORITHM characteristic.
+// See https://dev.mysql.com/doc/refman/5.7/en/view-algorithms.html
+type ViewAlgorithm int
+
+const (
+	AlgorithmUndefined ViewAlgorithm = iota
+	AlgorithmMerge
+	AlgorithmTemptable
+)
+
+func (v *ViewAlgorithm) String() string {
+	switch *v {
+	case AlgorithmMerge:
+		return "MERGE"
+	case AlgorithmTemptable:
+		return "TEMPTABLE"
+	case AlgorithmUndefined:
+		return "UNDEFINED"
+	default:
+		return "UNDEFINED"
+	}
+}
+
+// ViewSecurity is VIEW's SQL SECURITY characteristic.
+// See https://dev.mysql.com/doc/refman/5.7/en/create-view.html
+type ViewSecurity int
+
+const (
+	SecurityDefiner ViewSecurity = iota
+	SecurityInvoker
+)
+
+func (v *ViewSecurity) String() string {
+	switch *v {
+	case SecurityInvoker:
+		return "INVOKER"
+	case SecurityDefiner:
+		return "DEFINER"
+	default:
+		return "DEFINER"
+	}
+}
+
+// ViewCheckOption is VIEW's WITH CHECK OPTION clause part.
+// See https://dev.mysql.com/doc/refman/5.7/en/view-check-option.html
+type ViewCheckOption int
+
+const (
+	CheckOptionLocal ViewCheckOption = iota
+	CheckOptionCascaded
+)
+
+func (v *ViewCheckOption) String() string {
+	switch *v {
+	case CheckOptionLocal:
+		return "LOCAL"
+	case CheckOptionCascaded:
+		return "CASCADED"
+	default:
+		return "CASCADED"
+	}
+}
+
+// ViewInfo provides meta data describing a DB view.
+type ViewInfo struct {
+	Algorithm   ViewAlgorithm      `json:"view_algorithm"`
+	Definer     *auth.UserIdentity `json:"view_definer"`
+	Security    ViewSecurity       `json:"view_security"`
+	SelectStmt  string             `json:"view_select"`
+	CheckOption ViewCheckOption    `json:"view_checkoption"`
+	Cols        []CIStr            `json:"view_cols"`
 }
 
 // PartitionType is the type for PartitionInfo
@@ -490,7 +671,7 @@ func NewCIStr(s string) (cs CIStr) {
 
 // UnmarshalJSON implements the user defined unmarshal method.
 // CIStr can be unmarshaled from a single string, so PartitionDefinition.Name
-// in this change https://github.com/hanchuanchuan/goInception/pull/6460/files would be
+// in this change https://github.com/pingcap/tidb/pull/6460/files would be
 // compatible during TiDB upgrading.
 func (cis *CIStr) UnmarshalJSON(b []byte) error {
 	type T CIStr
@@ -567,8 +748,8 @@ func ColumnToProto(c *ColumnInfo) *tipb.ColumnInfo {
 // TODO: update it when more collate is supported.
 func collationToProto(c string) int32 {
 	v := mysql.CollationNames[c]
-	if v == mysql.BinaryCollationID {
-		return int32(mysql.BinaryCollationID)
+	if v == mysql.BinaryDefaultCollationID {
+		return int32(mysql.BinaryDefaultCollationID)
 	}
 	// We only support binary and utf8_bin collation.
 	// Setting other collations to utf8_bin for old data compatibility.
@@ -579,4 +760,10 @@ func collationToProto(c string) int32 {
 // GetTableColumnID gets a ID of a column with table ID
 func GetTableColumnID(tableInfo *TableInfo, col *ColumnInfo) string {
 	return fmt.Sprintf("%d_%d", tableInfo.ID, col.ID)
+}
+
+// TableColumnID is composed by table ID and column ID.
+type TableColumnID struct {
+	TableID  int64
+	ColumnID int64
 }

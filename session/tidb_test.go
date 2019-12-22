@@ -21,7 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hanchuanchuan/goInception/ast"
 	"github.com/hanchuanchuan/goInception/domain"
 	"github.com/hanchuanchuan/goInception/kv"
 	"github.com/hanchuanchuan/goInception/store/mockstore"
@@ -29,6 +28,7 @@ import (
 	"github.com/hanchuanchuan/goInception/util"
 	"github.com/hanchuanchuan/goInception/util/auth"
 	"github.com/hanchuanchuan/goInception/util/logutil"
+	"github.com/hanchuanchuan/goInception/util/sqlexec"
 	"github.com/hanchuanchuan/goInception/util/testleak"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
@@ -195,7 +195,7 @@ func removeStore(c *C, dbPath string) {
 	os.RemoveAll(dbPath)
 }
 
-func exec1(se Session, sql string, args ...interface{}) (ast.RecordSet, error) {
+func exec1(se Session, sql string, args ...interface{}) (sqlexec.RecordSet, error) {
 	ctx := context.Background()
 	if len(args) == 0 {
 		rs, err := se.Execute(ctx, sql)
@@ -215,7 +215,7 @@ func exec1(se Session, sql string, args ...interface{}) (ast.RecordSet, error) {
 	return rs, nil
 }
 
-func mustExecSQL(c *C, se Session, sql string, args ...interface{}) ast.RecordSet {
+func mustExecSQL(c *C, se Session, sql string, args ...interface{}) sqlexec.RecordSet {
 	rs, err := exec1(se, sql, args...)
 	c.Assert(err, IsNil)
 	return rs

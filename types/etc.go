@@ -183,7 +183,7 @@ func KindStr(kind byte) (r string) {
 //	cs: charset
 func TypeToStr(tp byte, cs string) (r string) {
 	ts := type2Str[tp]
-	if cs != charset.CharsetBin {
+	if cs != "binary" {
 		return ts
 	}
 	if IsTypeBlob(tp) {

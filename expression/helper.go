@@ -24,6 +24,7 @@ import (
 	"github.com/hanchuanchuan/goInception/sessionctx/variable"
 	"github.com/hanchuanchuan/goInception/terror"
 	"github.com/hanchuanchuan/goInception/types"
+	driver "github.com/hanchuanchuan/goInception/types/parser_driver"
 	"github.com/pingcap/errors"
 )
 
@@ -74,7 +75,7 @@ func GetTimeValue(ctx sessionctx.Context, v interface{}, tp byte, fsp int) (d ty
 				return d, errors.Trace(err)
 			}
 		}
-	case *ast.ValueExpr:
+	case *driver.ValueExpr:
 		switch x.Kind() {
 		case types.KindString:
 			value, err = types.ParseTime(sc, x.GetString(), tp, fsp)

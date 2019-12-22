@@ -16,13 +16,13 @@ package session
 import (
 	"fmt"
 
-	"github.com/hanchuanchuan/goInception/ast"
 	"github.com/hanchuanchuan/goInception/domain"
 	"github.com/hanchuanchuan/goInception/kv"
 	"github.com/hanchuanchuan/goInception/meta"
 	"github.com/hanchuanchuan/goInception/parser"
 	"github.com/hanchuanchuan/goInception/sessionctx"
 	"github.com/hanchuanchuan/goInception/sessionctx/variable"
+	"github.com/hanchuanchuan/goInception/statistics"
 	"github.com/hanchuanchuan/goInception/util/auth"
 	"github.com/hanchuanchuan/goInception/util/testleak"
 	. "github.com/pingcap/check"
@@ -55,7 +55,7 @@ func (s *testBootstrapSuite) TestBootstrap(c *C) {
 	err := r.Next(ctx, chk)
 	c.Assert(err, IsNil)
 	c.Assert(chk.NumRows() == 0, IsFalse)
-	datums := ast.RowToDatums(chk.GetRow(0), r.Fields())
+	datums := statistics.RowToDatums(chk.GetRow(0), r.Fields())
 	match(c, datums, []byte(`%`), []byte("root"), []byte(""), "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y")
 
 	c.Assert(se.Auth(&auth.UserIdentity{Username: "root", Hostname: "anyhost"}, []byte(""), []byte("")), IsTrue)
@@ -91,7 +91,7 @@ func (s *testBootstrapSuite) TestBootstrap(c *C) {
 	chk = r.NewChunk()
 	err = r.Next(ctx, chk)
 	c.Assert(err, IsNil)
-	datums = ast.RowToDatums(chk.GetRow(0), r.Fields())
+	datums = statistics.RowToDatums(chk.GetRow(0), r.Fields())
 	match(c, datums, 3)
 	mustExecSQL(c, se, "drop table if exists t")
 	se.Close()
@@ -159,7 +159,7 @@ func (s *testBootstrapSuite) TestBootstrapWithError(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(chk.NumRows() == 0, IsFalse)
 	row := chk.GetRow(0)
-	datums := ast.RowToDatums(row, r.Fields())
+	datums := statistics.RowToDatums(row, r.Fields())
 	match(c, datums, []byte(`%`), []byte("root"), []byte(""), "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y")
 	c.Assert(r.Close(), IsNil)
 

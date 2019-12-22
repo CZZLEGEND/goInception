@@ -26,6 +26,7 @@ import (
 	"github.com/hanchuanchuan/goInception/mysql"
 	"github.com/hanchuanchuan/goInception/sessionctx"
 	"github.com/hanchuanchuan/goInception/table"
+	driver "github.com/hanchuanchuan/goInception/types/parser_driver"
 	"github.com/hanchuanchuan/goInception/util/auth"
 	"github.com/hanchuanchuan/goInception/util/chunk"
 	"github.com/hanchuanchuan/goInception/util/kvcache"
@@ -156,7 +157,9 @@ func (e *Execute) OptimizePreparedPlan(ctx sessionctx.Context, is infoschema.Inf
 		if err != nil {
 			return errors.Trace(err)
 		}
-		prepared.Params[i].SetDatum(val)
+		param := prepared.Params[i].(*driver.ParamMarkerExpr)
+		param.Datum = val
+		param.InExecute = true
 		vars.PreparedParams = append(vars.PreparedParams, val)
 	}
 	if prepared.SchemaVersion != is.SchemaMetaVersion() {

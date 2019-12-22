@@ -28,8 +28,8 @@ import (
 	"github.com/hanchuanchuan/goInception/expression"
 	"github.com/hanchuanchuan/goInception/mysql"
 	"github.com/hanchuanchuan/goInception/planner/core"
-	// "github.com/hanchuanchuan/goInception/sessionctx/stmtctx"
 	"github.com/hanchuanchuan/goInception/types"
+	parserDriver "github.com/hanchuanchuan/goInception/types/parser_driver"
 	"github.com/hanchuanchuan/goInception/util/charset"
 	"github.com/pingcap/errors"
 	// log "github.com/sirupsen/logrus"
@@ -132,15 +132,21 @@ func checkAutoIncrementOp(colDef *ast.ColumnDef, num int) (bool, error) {
 			return hasAutoIncrement, nil
 		}
 		for _, op := range colDef.Options[num+1:] {
-			if op.Tp == ast.ColumnOptionDefaultValue && !op.Expr.GetDatum().IsNull() {
-				return hasAutoIncrement,
-					errors.Errorf(fmt.Sprintf(GetErrorMessage(ER_INVALID_DEFAULT), colDef.Name.Name.O))
+			if op.Tp == ast.ColumnOptionDefaultValue {
+				if v, ok := op.Expr.(*parserDriver.ValueExpr); ok {
+					if !v.IsNull() {
+						return hasAutoIncrement,
+							errors.Errorf(fmt.Sprintf(GetErrorMessage(ER_INVALID_DEFAULT), colDef.Name.Name.O))
+					}
+				}
 			}
 		}
 	}
 	if colDef.Options[num].Tp == ast.ColumnOptionDefaultValue && len(colDef.Options) != num+1 {
-		if colDef.Options[num].Expr.GetDatum().IsNull() {
-			return hasAutoIncrement, nil
+		if v, ok := colDef.Options[num].Expr.(*parserDriver.ValueExpr); ok {
+			if v.IsNull() {
+				return hasAutoIncrement, nil
+			}
 		}
 		for _, op := range colDef.Options[num+1:] {
 			if op.Tp == ast.ColumnOptionAutoIncrement {
@@ -198,8 +204,13 @@ func (s *session) isInvalidDefaultValue(colDef *ast.ColumnDef) bool {
 			if !(tp.Tp == mysql.TypeTimestamp || tp.Tp == mysql.TypeDatetime) && isDefaultValNowSymFunc(columnOpt.Expr) {
 				return true
 			} else {
-				if !types.IsTypeTime(tp.Tp) ||
-					columnOpt.Expr.GetDatum().IsNull() || isDefaultValNowSymFunc(columnOpt.Expr) {
+
+				isnull := false
+				if v, ok := columnOpt.Expr.(*parserDriver.ValueExpr); ok {
+					isnull = v.IsNull()
+				}
+
+				if !types.IsTypeTime(tp.Tp) || isnull || isDefaultValNowSymFunc(columnOpt.Expr) {
 					return false
 				}
 

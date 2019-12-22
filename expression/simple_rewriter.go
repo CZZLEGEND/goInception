@@ -21,6 +21,7 @@ import (
 	"github.com/hanchuanchuan/goInception/parser/opcode"
 	"github.com/hanchuanchuan/goInception/sessionctx"
 	"github.com/hanchuanchuan/goInception/types"
+	driver "github.com/hanchuanchuan/goInception/types/parser_driver"
 	"github.com/pingcap/errors"
 )
 
@@ -118,7 +119,7 @@ func (sr *simpleRewriter) Leave(originInNode ast.Node) (retNode ast.Node, ok boo
 			return originInNode, false
 		}
 		sr.push(column)
-	case *ast.ValueExpr:
+	case *driver.ValueExpr:
 		value := &Constant{Value: v.Datum, RetType: &v.Type}
 		sr.push(value)
 	case *ast.FuncCallExpr:
@@ -148,7 +149,7 @@ func (sr *simpleRewriter) Leave(originInNode ast.Node) (retNode ast.Node, ok boo
 		if v.Sel == nil {
 			sr.inToExpression(len(v.List), v.Not, &v.Type)
 		}
-	case *ast.ParamMarkerExpr:
+	case *driver.ParamMarkerExpr:
 		tp := types.NewFieldType(mysql.TypeUnspecified)
 		types.DefaultParamTypeForValue(v.GetValue(), tp)
 		value := &Constant{Value: v.Datum, RetType: tp}

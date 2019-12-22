@@ -16,6 +16,9 @@ package mysql
 import (
 	"fmt"
 	"strings"
+
+	. "github.com/hanchuanchuan/goInception/format"
+	"github.com/pingcap/errors"
 )
 
 func newInvalidModeErr(s string) error {
@@ -28,7 +31,7 @@ var (
 	TiDBReleaseVersion = "None"
 
 	// ServerVersion is the version information of this tidb-server in MySQL's format.
-	ServerVersion = fmt.Sprintf("5.7.10-TiDB-%s", TiDBReleaseVersion)
+	ServerVersion = fmt.Sprintf("5.7.25-TiDB-%s", TiDBReleaseVersion)
 )
 
 // Header information.
@@ -179,6 +182,10 @@ const (
 	GlobalStatusTable = "GLOBAL_STATUS"
 	// TiDBTable is the table contains tidb info.
 	TiDBTable = "tidb"
+	//  RoleEdgesTable is the table contains role relation info
+	RoleEdgeTable = "role_edges"
+	// DefaultRoleTable is the table contain default active role info
+	DefaultRoleTable = "default_roles"
 )
 
 // PrivilegeType  privilege
@@ -218,6 +225,14 @@ const (
 	ExecutePriv
 	// IndexPriv is the privilege to create/drop index.
 	IndexPriv
+	// CreateViewPriv is the privilege to create view.
+	CreateViewPriv
+	// ShowViewPriv is the privilege to show create view.
+	ShowViewPriv
+	// CreateRolePriv the privilege to create a role.
+	CreateRolePriv
+	// DropRolePriv is the privilege to drop a role.
+	DropRolePriv
 	// AllPriv is the privilege for all actions.
 	AllPriv
 )
@@ -232,19 +247,22 @@ const (
 	// which is 1 more than the maximum number of decimals permitted for the DECIMAL, FLOAT, and DOUBLE data types.
 	NotFixedDec = 31
 
-	MaxIntWidth             = 20
-	MaxRealWidth            = 23
-	MaxFloatingTypeScale    = 30
-	MaxFloatingTypeWidth    = 255
-	MaxDecimalScale         = 30
-	MaxDecimalWidth         = 65
-	MaxDateWidth            = 10 // YYYY-MM-DD.
-	MaxDatetimeWidthNoFsp   = 19 // YYYY-MM-DD HH:MM:SS
-	MaxDatetimeWidthWithFsp = 26 // YYYY-MM-DD HH:MM:SS[.fraction]
-	MaxDatetimeFullWidth    = 29 // YYYY-MM-DD HH:MM:SS.###### AM
-	MaxDurationWidthNoFsp   = 10 // HH:MM:SS
-	MaxDurationWidthWithFsp = 15 // HH:MM:SS[.fraction]
-	MaxBlobWidth            = 16777216
+	MaxIntWidth              = 20
+	MaxRealWidth             = 23
+	MaxFloatingTypeScale     = 30
+	MaxFloatingTypeWidth     = 255
+	MaxDecimalScale          = 30
+	MaxDecimalWidth          = 65
+	MaxDateWidth             = 10 // YYYY-MM-DD.
+	MaxDatetimeWidthNoFsp    = 19 // YYYY-MM-DD HH:MM:SS
+	MaxDatetimeWidthWithFsp  = 26 // YYYY-MM-DD HH:MM:SS[.fraction]
+	MaxDatetimeFullWidth     = 29 // YYYY-MM-DD HH:MM:SS.###### AM
+	MaxDurationWidthNoFsp    = 10 // HH:MM:SS
+	MaxDurationWidthWithFsp  = 15 // HH:MM:SS[.fraction]
+	MaxBlobWidth             = 16777216
+	MaxBitDisplayWidth       = 64
+	MaxFloatPrecisionLength  = 24
+	MaxDoublePrecisionLength = 53
 )
 
 // MySQL max type field length.
@@ -277,6 +295,10 @@ var Priv2UserCol = map[PrivilegeType]string{
 	AlterPriv:      "Alter_priv",
 	ExecutePriv:    "Execute_priv",
 	IndexPriv:      "Index_priv",
+	CreateViewPriv: "Create_view_priv",
+	ShowViewPriv:   "Show_view_priv",
+	CreateRolePriv: "Create_role_priv",
+	DropRolePriv:   "Drop_role_priv",
 }
 
 // Command2Str is the command information to command name.
@@ -333,10 +355,14 @@ var Col2PrivType = map[string]PrivilegeType{
 	"Alter_priv":       AlterPriv,
 	"Execute_priv":     ExecutePriv,
 	"Index_priv":       IndexPriv,
+	"Create_view_priv": CreateViewPriv,
+	"Show_view_priv":   ShowViewPriv,
+	"Create_role_priv": CreateRolePriv,
+	"Drop_role_priv":   DropRolePriv,
 }
 
 // AllGlobalPrivs is all the privileges in global scope.
-var AllGlobalPrivs = []PrivilegeType{SelectPriv, InsertPriv, UpdatePriv, DeletePriv, CreatePriv, DropPriv, ProcessPriv, GrantPriv, ReferencesPriv, AlterPriv, ShowDBPriv, SuperPriv, ExecutePriv, IndexPriv, CreateUserPriv, TriggerPriv}
+var AllGlobalPrivs = []PrivilegeType{SelectPriv, InsertPriv, UpdatePriv, DeletePriv, CreatePriv, DropPriv, ProcessPriv, GrantPriv, ReferencesPriv, AlterPriv, ShowDBPriv, SuperPriv, ExecutePriv, IndexPriv, CreateUserPriv, TriggerPriv, CreateViewPriv, ShowViewPriv, CreateRolePriv, DropRolePriv}
 
 // Priv2Str is the map for privilege to string.
 var Priv2Str = map[PrivilegeType]string{
@@ -356,38 +382,48 @@ var Priv2Str = map[PrivilegeType]string{
 	AlterPriv:      "Alter",
 	ExecutePriv:    "Execute",
 	IndexPriv:      "Index",
+	CreateViewPriv: "Create View",
+	ShowViewPriv:   "Show View",
+	CreateRolePriv: "Create Role",
+	DropRolePriv:   "Drop Role",
 }
 
 // Priv2SetStr is the map for privilege to string.
 var Priv2SetStr = map[PrivilegeType]string{
-	CreatePriv:  "Create",
-	SelectPriv:  "Select",
-	InsertPriv:  "Insert",
-	UpdatePriv:  "Update",
-	DeletePriv:  "Delete",
-	DropPriv:    "Drop",
-	GrantPriv:   "Grant",
-	AlterPriv:   "Alter",
-	ExecutePriv: "Execute",
-	IndexPriv:   "Index",
+	CreatePriv:     "Create",
+	SelectPriv:     "Select",
+	InsertPriv:     "Insert",
+	UpdatePriv:     "Update",
+	DeletePriv:     "Delete",
+	DropPriv:       "Drop",
+	GrantPriv:      "Grant",
+	AlterPriv:      "Alter",
+	ExecutePriv:    "Execute",
+	IndexPriv:      "Index",
+	CreateViewPriv: "Create View",
+	ShowViewPriv:   "Show View",
+	CreateRolePriv: "Create Role",
+	DropRolePriv:   "Drop Role",
 }
 
 // SetStr2Priv is the map for privilege set string to privilege type.
 var SetStr2Priv = map[string]PrivilegeType{
-	"Create":  CreatePriv,
-	"Select":  SelectPriv,
-	"Insert":  InsertPriv,
-	"Update":  UpdatePriv,
-	"Delete":  DeletePriv,
-	"Drop":    DropPriv,
-	"Grant":   GrantPriv,
-	"Alter":   AlterPriv,
-	"Execute": ExecutePriv,
-	"Index":   IndexPriv,
+	"Create":      CreatePriv,
+	"Select":      SelectPriv,
+	"Insert":      InsertPriv,
+	"Update":      UpdatePriv,
+	"Delete":      DeletePriv,
+	"Drop":        DropPriv,
+	"Grant":       GrantPriv,
+	"Alter":       AlterPriv,
+	"Execute":     ExecutePriv,
+	"Index":       IndexPriv,
+	"Create View": CreateViewPriv,
+	"Show View":   ShowViewPriv,
 }
 
 // AllDBPrivs is all the privileges in database scope.
-var AllDBPrivs = []PrivilegeType{SelectPriv, InsertPriv, UpdatePriv, DeletePriv, CreatePriv, DropPriv, GrantPriv, AlterPriv, ExecutePriv, IndexPriv}
+var AllDBPrivs = []PrivilegeType{SelectPriv, InsertPriv, UpdatePriv, DeletePriv, CreatePriv, DropPriv, GrantPriv, AlterPriv, ExecutePriv, IndexPriv, CreateViewPriv, ShowViewPriv}
 
 // AllTablePrivs is all the privileges in table scope.
 var AllTablePrivs = []PrivilegeType{SelectPriv, InsertPriv, UpdatePriv, DeletePriv, CreatePriv, DropPriv, GrantPriv, AlterPriv, IndexPriv}
@@ -399,7 +435,7 @@ var AllColumnPrivs = []PrivilegeType{SelectPriv, InsertPriv, UpdatePriv}
 const AllPrivilegeLiteral = "ALL PRIVILEGES"
 
 // DefaultSQLMode for GLOBAL_VARIABLES
-const DefaultSQLMode = "STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION"
+const DefaultSQLMode = "ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION"
 
 // DefaultLengthOfMysqlTypes is the map for default physical length of MySQL data types.
 // See http://dev.mysql.com/doc/refman/5.7/en/storage-requirements.html
@@ -506,6 +542,16 @@ func (m SQLMode) HasIgnoreSpaceMode() bool {
 	return m&ModeIgnoreSpace == ModeIgnoreSpace
 }
 
+// HasNoAutoCreateUserMode detects if 'NO_AUTO_CREATE_USER' mode is set in SQLMode
+func (m SQLMode) HasNoAutoCreateUserMode() bool {
+	return m&ModeNoAutoCreateUser == ModeNoAutoCreateUser
+}
+
+// HasAllowInvalidDatesMode detects if 'ALLOW_INVALID_DATES' mode is set in SQLMode
+func (m SQLMode) HasAllowInvalidDatesMode() bool {
+	return m&ModeAllowInvalidDates == ModeAllowInvalidDates
+}
+
 // consts for sql modes.
 const (
 	ModeNone        SQLMode = 0
@@ -541,6 +587,7 @@ const (
 	ModeHighNotPrecedence
 	ModeNoEngineSubstitution
 	ModePadCharToFullLength
+	ModeAllowInvalidDates
 )
 
 // FormatSQLModeStr re-format 'SQL_MODE' variable.
@@ -618,6 +665,7 @@ var Str2SQLMode = map[string]SQLMode{
 	"HIGH_NOT_PRECEDENCE":        ModeHighNotPrecedence,
 	"NO_ENGINE_SUBSTITUTION":     ModeNoEngineSubstitution,
 	"PAD_CHAR_TO_FULL_LENGTH":    ModePadCharToFullLength,
+	"ALLOW_INVALID_DATES":        ModeAllowInvalidDates,
 }
 
 // CombinationSQLMode is the special modes that provided as shorthand for combinations of mode values.
@@ -687,6 +735,23 @@ func Str2Priority(val string) PriorityEnum {
 	default:
 		return NoPriority
 	}
+}
+
+// Restore implements Node interface.
+func (n *PriorityEnum) Restore(ctx *RestoreCtx) error {
+	switch *n {
+	case NoPriority:
+		return nil
+	case LowPriority:
+		ctx.WriteKeyWord("LOW_PRIORITY")
+	case HighPriority:
+		ctx.WriteKeyWord("HIGH_PRIORITY")
+	case DelayedPriority:
+		ctx.WriteKeyWord("DELAYED")
+	default:
+		return errors.Errorf("undefined PriorityEnum Type[%d]", *n)
+	}
+	return nil
 }
 
 // PrimaryKeyName defines primary key name.

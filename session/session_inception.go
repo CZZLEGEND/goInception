@@ -45,6 +45,7 @@ import (
 	"github.com/hanchuanchuan/goInception/parser/opcode"
 	"github.com/hanchuanchuan/goInception/sessionctx/variable"
 	"github.com/hanchuanchuan/goInception/types"
+	parserDriver "github.com/hanchuanchuan/goInception/types/parser_driver"
 	"github.com/hanchuanchuan/goInception/util"
 	"github.com/hanchuanchuan/goInception/util/auth"
 	"github.com/hanchuanchuan/goInception/util/charset"
@@ -3985,7 +3986,7 @@ func (s *session) checkAlterTableAlterColumn(t *TableInfo, c *ast.AlterTableSpec
 			} else {
 				// "SET" "DEFAULT" SignedLiteral
 				for _, op := range nc.Options {
-					defaultValue := fmt.Sprint(op.Expr.GetValue())
+					defaultValue := getValueForValueExpr(op.Expr)
 
 					if len(defaultValue) == 0 {
 						switch strings.Split(foundField.Type, "(")[0] {
@@ -4002,6 +4003,28 @@ func (s *session) checkAlterTableAlterColumn(t *TableInfo, c *ast.AlterTableSpec
 		}
 	}
 }
+
+func getValueForValueExpr(n ast.ExprNode) string {
+	switch v := n.(type) {
+	case *parserDriver.ValueExpr:
+		return fmt.Sprint(v.GetValue())
+	default:
+		log.Errorf("Can't parser type: %T", v)
+		return ""
+	}
+	return ""
+}
+
+// func getDatumForValueExpr(n ast.ExprNode) *types.Datum {
+// 	switch v := n.(type) {
+// 	case *parserDriver.ValueExpr:
+// 		return v.GetDatum()
+// 	default:
+// 		log.Errorf("Can't parser type: %T", v)
+// 		return nil
+// 	}
+// 	return nil
+// }
 
 func (s *session) checkAlterTableRenameIndex(t *TableInfo, c *ast.AlterTableSpec) {
 
@@ -4494,7 +4517,7 @@ func (s *session) mysqlCheckField(t *TableInfo, field *ast.ColumnDef) {
 	autoIncrement := false
 	hasDefaultValue := false
 	hasGenerated := false
-	var defaultValue *types.Datum
+	var defaultValue *parserDriver.ValueExpr
 	var defaultExpr ast.ExprNode
 
 	isPrimary := false
@@ -4504,7 +4527,7 @@ func (s *session) mysqlCheckField(t *TableInfo, field *ast.ColumnDef) {
 
 			switch op.Tp {
 			case ast.ColumnOptionComment:
-				if op.Expr.GetDatum().GetString() != "" {
+				if getValueForValueExpr(op.Expr) != "" {
 					hasComment = true
 				}
 			case ast.ColumnOptionNotNull:
@@ -4515,7 +4538,7 @@ func (s *session) mysqlCheckField(t *TableInfo, field *ast.ColumnDef) {
 				autoIncrement = true
 			case ast.ColumnOptionDefaultValue:
 				defaultExpr = op.Expr
-				defaultValue = op.Expr.GetDatum()
+				defaultValue = op.Expr.(*parserDriver.ValueExpr)
 				hasDefaultValue = true
 			case ast.ColumnOptionPrimaryKey:
 				isPrimary = true
@@ -4543,12 +4566,12 @@ func (s *session) mysqlCheckField(t *TableInfo, field *ast.ColumnDef) {
 	}
 
 	//有默认值，且为NULL，且有NOT NULL约束，如(not null default null)
-	if _, ok := defaultExpr.(*ast.ValueExpr); ok && hasDefaultValue && defaultValue.IsNull() && notNullFlag {
+	if _, ok := defaultExpr.(*parserDriver.ValueExpr); ok && hasDefaultValue && defaultValue.IsNull() && notNullFlag {
 		s.AppendErrorNo(ER_INVALID_DEFAULT, field.Name.Name.O)
 	}
 
 	//有默认值，且不为NULL
-	if _, ok := defaultExpr.(*ast.ValueExpr); ok && hasDefaultValue && !defaultValue.IsNull() {
+	if _, ok := defaultExpr.(*parserDriver.ValueExpr); ok && hasDefaultValue && !defaultValue.IsNull() {
 		switch field.Tp.Tp {
 		case mysql.TypeTiny, mysql.TypeShort, mysql.TypeInt24,
 			mysql.TypeLong, mysql.TypeLonglong,
@@ -5465,7 +5488,7 @@ func (s *session) checkInsert(node *ast.InsertStmt, sql string) {
 
 					s.checkItem(vv, []*TableInfo{table})
 
-					if v, ok := vv.(*ast.ValueExpr); ok {
+					if v, ok := vv.(*parserDriver.ValueExpr); ok {
 						name := x.Columns[colIndex].Name.L
 						if _, ok := columnsCannotNull[name]; ok && v.Type.Tp == mysql.TypeNull {
 							s.AppendErrorNo(ER_BAD_NULL_ERROR, x.Columns[colIndex], i+1)
@@ -5930,13 +5953,13 @@ func (s *session) executeInceptionSet(node *ast.InceptionSetStmt, sql string) ([
 			return nil, errors.New("无效参数")
 		}
 
-		var value *ast.ValueExpr
+		var value *parserDriver.ValueExpr
 
 		switch expr := v.Value.(type) {
-		case *ast.ValueExpr:
+		case *parserDriver.ValueExpr:
 			value = expr
 		case *ast.UnaryOperationExpr:
-			value, _ = expr.V.(*ast.ValueExpr)
+			value, _ = expr.V.(*parserDriver.ValueExpr)
 			if expr.Op == opcode.Minus {
 				value.Datum = types.NewIntDatum(value.GetInt64() * -1)
 			}
@@ -5990,7 +6013,7 @@ func (s *session) executeInceptionSet(node *ast.InceptionSetStmt, sql string) ([
 }
 
 func (s *session) setVariableValue(t reflect.Type, values reflect.Value,
-	name string, value *ast.ValueExpr) error {
+	name string, value *parserDriver.ValueExpr) error {
 
 	// t := reflect.TypeOf(*(obj))
 	// // values := reflect.ValueOf(obj).Elem()
@@ -6017,7 +6040,7 @@ func (s *session) setVariableValue(t reflect.Type, values reflect.Value,
 }
 
 func (s *session) setLevelValue(t reflect.Type, values reflect.Value,
-	name string, value *ast.ValueExpr) error {
+	name string, value *parserDriver.ValueExpr) error {
 
 	found := false
 	for i := 0; i < values.NumField(); i++ {
@@ -6146,7 +6169,7 @@ func (s *session) showVariables(node *ast.ShowStmt, obj interface{}, res *Variab
 	)
 	if node.Pattern != nil {
 		if node.Pattern.Pattern != nil {
-			va, _ := node.Pattern.Pattern.(*ast.ValueExpr)
+			va, _ := node.Pattern.Pattern.(*parserDriver.ValueExpr)
 			like = va.GetString()
 		}
 		patChars, patTypes = stringutil.CompilePattern(like, node.Pattern.Escape)
@@ -6293,7 +6316,7 @@ func filterExprNode(expr ast.ExprNode, colNames []string, values []string) (bool
 				return false, err
 			}
 			if colIndex > -1 {
-				if v, ok := x.R.(*ast.ValueExpr); ok {
+				if v, ok := x.R.(*parserDriver.ValueExpr); ok {
 					sVal, _ := v.ToString()
 					if sVal == values[colIndex] {
 						return true, nil
@@ -6310,7 +6333,7 @@ func filterExprNode(expr ast.ExprNode, colNames []string, values []string) (bool
 			return false, err
 		}
 		if colIndex > -1 {
-			if v, ok := x.Pattern.(*ast.ValueExpr); ok {
+			if v, ok := x.Pattern.(*parserDriver.ValueExpr); ok {
 				like := strings.ToLower(v.GetString())
 				patChars, patTypes := stringutil.CompilePattern(like, x.Escape)
 				match := stringutil.DoMatch(strings.ToLower(values[colIndex]), patChars, patTypes)
@@ -7154,7 +7177,7 @@ func (s *session) checkColumnTypeImplicitConversion(e *ast.BinaryOperationExpr, 
 	log.Debug("checkColumnTypeImplicitConversion")
 
 	col, ok1 := e.L.(*ast.ColumnNameExpr)
-	val, ok2 := e.R.(*ast.ValueExpr)
+	val, ok2 := e.R.(*parserDriver.ValueExpr)
 	// && val != nil 可以判断非空列的is null逻辑
 
 	if ok1 && ok2 && val != nil {
@@ -7275,7 +7298,7 @@ func (s *session) checkItem(expr ast.ExprNode, tables []*TableInfo) bool {
 	case *ast.VariableExpr:
 		s.checkItem(e.Value, tables)
 
-	case *ast.ValueExpr, *ast.ParamMarkerExpr, *ast.PositionExpr:
+	case *parserDriver.ValueExpr, *parserDriver.ParamMarkerExpr, *ast.PositionExpr:
 		// pass
 
 	default:
@@ -7933,7 +7956,7 @@ func (s *session) buildNewColumnToCache(t *TableInfo, field *ast.ColumnDef) *Fie
 	for _, op := range field.Options {
 		switch op.Tp {
 		case ast.ColumnOptionComment:
-			c.Comment = op.Expr.GetDatum().GetString()
+			c.Comment = getValueForValueExpr(op.Expr)
 		case ast.ColumnOptionNull:
 			c.Null = "YES"
 
@@ -7950,14 +7973,15 @@ func (s *session) buildNewColumnToCache(t *TableInfo, field *ast.ColumnDef) *Fie
 			field.Tp.Flag |= mysql.UniqueKeyFlag
 
 		case ast.ColumnOptionDefaultValue:
-
-			if op.Expr.GetDatum().IsNull() {
-				c.Null = "YES"
-				// *c.Default = "NULL"
-				c.Default = nil
-			} else {
-				c.Default = new(string)
-				*c.Default = fmt.Sprint(op.Expr.GetValue())
+			if v, ok := op.Expr.(*parserDriver.ValueExpr); ok {
+				if v.IsNull() {
+					c.Null = "YES"
+					// *c.Default = "NULL"
+					c.Default = nil
+				} else {
+					c.Default = new(string)
+					*c.Default = fmt.Sprint(v.GetDatumString())
+				}
 			}
 		case ast.ColumnOptionAutoIncrement:
 			if strings.ToLower(c.Field) != "id" {
@@ -8474,7 +8498,7 @@ func (s *session) cleanup() {
 func (s *session) checkSetStmt(node *ast.SetStmt) {
 	for _, variable := range node.Variables {
 		if variable.Name == ast.SetNames {
-			if value, ok := variable.Value.(*ast.ValueExpr); ok {
+			if value, ok := variable.Value.(*parserDriver.ValueExpr); ok {
 				v := value.GetString()
 				if strings.EqualFold(v, "utf8") || strings.EqualFold(v, "utf8mb4") {
 					continue
