@@ -253,7 +253,8 @@ type SessionVars struct {
 	AllowAggPushDown bool
 
 	// AllowInSubqueryUnFolding can be set to true to fold in subquery
-	AllowInSubqueryUnFolding bool
+	// AllowInSubqToJoinAndAgg can be set to false to forbid rewriting the semi join to inner join with agg.
+	AllowInSubqToJoinAndAgg bool
 
 	// CurrInsertValues is used to record current ValuesExpr's values.
 	// See http://dev.mysql.com/doc/refman/5.7/en/miscellaneous-functions.html#function_values
@@ -552,8 +553,8 @@ func (s *SessionVars) SetSystemVar(name string, val string) error {
 		s.SkipUTF8Check = TiDBOptOn(val)
 	case TiDBOptAggPushDown:
 		s.AllowAggPushDown = TiDBOptOn(val)
-	case TiDBOptInSubqUnFolding:
-		s.AllowInSubqueryUnFolding = TiDBOptOn(val)
+	case TiDBOptInSubqToJoinAndAgg:
+		s.AllowInSubqToJoinAndAgg = TiDBOptOn(val)
 	case TiDBIndexLookupConcurrency:
 		s.IndexLookupConcurrency = tidbOptPositiveInt32(val, DefIndexLookupConcurrency)
 	case TiDBIndexLookupJoinConcurrency:

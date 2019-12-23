@@ -67,6 +67,9 @@ const (
 		Create_user_priv		ENUM('N','Y') NOT NULL DEFAULT 'N',
 		Event_priv			ENUM('N','Y') NOT NULL DEFAULT 'N',
 		Trigger_priv			ENUM('N','Y') NOT NULL DEFAULT 'N',
+		Create_role_priv		ENUM('N','Y') NOT NULL DEFAULT 'N',
+		Drop_role_priv			ENUM('N','Y') NOT NULL DEFAULT 'N',
+		Account_locked			ENUM('N','Y') NOT NULL DEFAULT 'N',
 		PRIMARY KEY (Host, User));`
 	// CreateDBPrivTable is the SQL statement creates DB scope privilege table in system db.
 	CreateDBPrivTable = `CREATE TABLE if not exists mysql.db (
@@ -101,7 +104,7 @@ const (
 		Table_name	CHAR(64),
 		Grantor		CHAR(77),
 		Timestamp	Timestamp DEFAULT CURRENT_TIMESTAMP,
-		Table_priv	SET('Select','Insert','Update','Delete','Create','Drop','Grant', 'Index','Alter'),
+		Table_priv	SET('Select','Insert','Update','Delete','Create','Drop','Grant','Index','Alter','Create View','Show View','Trigger','References'),
 		Column_priv	SET('Select','Insert','Update'),
 		PRIMARY KEY (Host, DB, User, Table_name));`
 	// CreateColumnPrivTable is the SQL statement creates column scope privilege table in system db.
@@ -165,6 +168,8 @@ const (
 		cm_sketch blob,
 		stats_ver bigint(64) NOT NULL DEFAULT 0,
 		flag bigint(64) NOT NULL DEFAULT 0,
+		correlation double NOT NULL DEFAULT 0,
+		last_analyze_pos blob DEFAULT NULL,
 		unique index tbl(table_id, is_index, hist_id)
 	);`
 
@@ -208,6 +213,59 @@ const (
 		hist_id bigint(64) NOT NULL,
 		feedback blob NOT NULL,
 		index hist(table_id, is_index, hist_id)
+	);`
+
+	// CreateBindInfoTable stores the sql bind info which is used to update globalBindCache.
+	CreateBindInfoTable = `CREATE TABLE IF NOT EXISTS mysql.bind_info (
+		original_sql text NOT NULL  ,
+      	bind_sql text NOT NULL ,
+      	default_db text  NOT NULL,
+		status text NOT NULL,
+		create_time timestamp(3) NOT NULL,
+		update_time timestamp(3) NOT NULL,
+		charset text NOT NULL,
+		collation text NOT NULL,
+		INDEX sql_index(original_sql(1024),default_db(1024)) COMMENT "accelerate the speed when add global binding query",
+		INDEX time_index(update_time) COMMENT "accelerate the speed when querying with last update time"
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;`
+
+	// CreateRoleEdgesTable stores the role and user relationship information.
+	CreateRoleEdgesTable = `CREATE TABLE IF NOT EXISTS mysql.role_edges (
+		FROM_HOST char(60) COLLATE utf8_bin NOT NULL DEFAULT '',
+		FROM_USER char(32) COLLATE utf8_bin NOT NULL DEFAULT '',
+		TO_HOST char(60) COLLATE utf8_bin NOT NULL DEFAULT '',
+		TO_USER char(32) COLLATE utf8_bin NOT NULL DEFAULT '',
+		WITH_ADMIN_OPTION enum('N','Y') CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT 'N',
+		PRIMARY KEY (FROM_HOST,FROM_USER,TO_HOST,TO_USER)
+	);`
+
+	// CreateDefaultRolesTable stores the active roles for a user.
+	CreateDefaultRolesTable = `CREATE TABLE IF NOT EXISTS mysql.default_roles (
+		HOST char(60) COLLATE utf8_bin NOT NULL DEFAULT '',
+		USER char(32) COLLATE utf8_bin NOT NULL DEFAULT '',
+		DEFAULT_ROLE_HOST char(60) COLLATE utf8_bin NOT NULL DEFAULT '%',
+		DEFAULT_ROLE_USER char(32) COLLATE utf8_bin NOT NULL DEFAULT '',
+		PRIMARY KEY (HOST,USER,DEFAULT_ROLE_HOST,DEFAULT_ROLE_USER)
+	)`
+
+	// CreateStatsTopNTable stores topn data of a cmsketch with top n.
+	CreateStatsTopNTable = `CREATE TABLE if not exists mysql.stats_top_n (
+		table_id bigint(64) NOT NULL,
+		is_index tinyint(2) NOT NULL,
+		hist_id bigint(64) NOT NULL,
+		value longblob,
+		count bigint(64) UNSIGNED NOT NULL,
+		index tbl(table_id, is_index, hist_id)
+	);`
+
+	// CreateExprPushdownBlacklist stores the expressions which are not allowed to be pushed down.
+	CreateExprPushdownBlacklist = `CREATE TABLE IF NOT EXISTS mysql.expr_pushdown_blacklist (
+		name char(100) NOT NULL
+	);`
+
+	// CreateOptRuleBlacklist stores the list of disabled optimizing operations.
+	CreateOptRuleBlacklist = `CREATE TABLE IF NOT EXISTS mysql.opt_rule_blacklist (
+		name char(100) NOT NULL
 	);`
 )
 
@@ -720,6 +778,18 @@ func doDDLWorks(s Session) {
 	mustExecute(s, CreateGCDeleteRangeDoneTable)
 	// Create stats_feedback table.
 	mustExecute(s, CreateStatsFeedbackTable)
+	// Create role_edges table.
+	mustExecute(s, CreateRoleEdgesTable)
+	// Create default_roles table.
+	mustExecute(s, CreateDefaultRolesTable)
+	// Create bind_info table.
+	mustExecute(s, CreateBindInfoTable)
+	// Create stats_topn_store table.
+	mustExecute(s, CreateStatsTopNTable)
+	// Create expr_pushdown_blacklist table.
+	mustExecute(s, CreateExprPushdownBlacklist)
+	// Create opt_rule_blacklist table.
+	mustExecute(s, CreateOptRuleBlacklist)
 }
 
 // doDMLWorks executes DML statements in bootstrap stage.
@@ -729,7 +799,7 @@ func doDMLWorks(s Session) {
 
 	// Insert a default user with empty password.
 	mustExecute(s, `INSERT HIGH_PRIORITY INTO mysql.user VALUES
-		("%", "root", "", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y")`)
+		("%", "root", "", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "Y", "N")`)
 
 	// Init global system variables table.
 	values := make([]string, 0, len(variable.SysVars))

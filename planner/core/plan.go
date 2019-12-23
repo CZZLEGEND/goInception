@@ -125,7 +125,7 @@ type PhysicalPlan interface {
 	ExplainInfo() string
 
 	// getChildReqProps gets the required property by child index.
-	getChildReqProps(idx int) *property.PhysicalProperty
+	GetChildReqProps(idx int) *property.PhysicalProperty
 
 	// StatsCount returns the count of property.StatsInfo for this plan.
 	StatsCount() float64
@@ -161,7 +161,7 @@ type basePhysicalPlan struct {
 	children         []PhysicalPlan
 }
 
-func (p *basePhysicalPlan) getChildReqProps(idx int) *property.PhysicalProperty {
+func (p *basePhysicalPlan) GetChildReqProps(idx int) *property.PhysicalProperty {
 	return p.childrenReqProps[idx]
 }
 
@@ -298,5 +298,5 @@ func (p *baseLogicalPlan) findColumn(column *ast.ColumnName) (*expression.Column
 	if err == nil && col == nil {
 		err = errors.Errorf("column %s not found", column.Name.O)
 	}
-	return col, idx, errors.Trace(err)
+	return col, idx, err
 }

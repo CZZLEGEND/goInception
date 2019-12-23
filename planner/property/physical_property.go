@@ -20,6 +20,12 @@ import (
 	"github.com/hanchuanchuan/goInception/util/codec"
 )
 
+// Item wraps the column and its order.
+type Item struct {
+	Col  *expression.Column
+	Desc bool
+}
+
 // PhysicalProperty stands for the required physical property by parents.
 // It contains the orders, if the order is desc and the task types.
 type PhysicalProperty struct {
@@ -100,4 +106,19 @@ func (p *PhysicalProperty) HashCode() []byte {
 // String implements fmt.Stringer interface. Just for test.
 func (p *PhysicalProperty) String() string {
 	return fmt.Sprintf("Prop{cols: %v, desc: %v, TaskTp: %s, expectedCount: %v}", p.Cols, p.Desc, p.TaskTp, p.ExpectedCnt)
+}
+
+// Clone returns a copy of PhysicalProperty. Currently, this function is only used to build new
+// required property for children plan in `exhaustPhysicalPlans`, so we don't copy `Enforced` field
+// because if `Enforced` is true, the `Items` must be empty now, this makes `Enforced` meaningless
+// for children nodes.
+func (p *PhysicalProperty) Clone() *PhysicalProperty {
+	prop := &PhysicalProperty{
+		//	Items:       p.Items,
+		Cols:        p.Cols,
+		Desc:        p.Desc,
+		TaskTp:      p.TaskTp,
+		ExpectedCnt: p.ExpectedCnt,
+	}
+	return prop
 }

@@ -4006,7 +4006,7 @@ func (s *session) checkAlterTableAlterColumn(t *TableInfo, c *ast.AlterTableSpec
 
 func getValueForValueExpr(n ast.ExprNode) string {
 	switch v := n.(type) {
-	case *parserDriver.ValueExpr:
+	case ast.ValueExpr:
 		return fmt.Sprint(v.GetValue())
 	default:
 		log.Errorf("Can't parser type: %T", v)
@@ -4017,7 +4017,7 @@ func getValueForValueExpr(n ast.ExprNode) string {
 
 // func getDatumForValueExpr(n ast.ExprNode) *types.Datum {
 // 	switch v := n.(type) {
-// 	case *parserDriver.ValueExpr:
+// 	case ast.ValueExpr:
 // 		return v.GetDatum()
 // 	default:
 // 		log.Errorf("Can't parser type: %T", v)

@@ -18,6 +18,8 @@
 package table
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -28,6 +30,7 @@ import (
 	"github.com/hanchuanchuan/goInception/sessionctx"
 	"github.com/hanchuanchuan/goInception/sessionctx/stmtctx"
 	"github.com/hanchuanchuan/goInception/types"
+	field_types "github.com/hanchuanchuan/goInception/types"
 	"github.com/hanchuanchuan/goInception/types/json"
 	"github.com/hanchuanchuan/goInception/util/charset"
 	"github.com/hanchuanchuan/goInception/util/hack"
@@ -185,9 +188,12 @@ func CastValue(ctx sessionctx.Context, val types.Datum, col *model.ColumnInfo) (
 
 // ColDesc describes column information like MySQL desc and show columns do.
 type ColDesc struct {
-	Field        string
-	Type         string
-	Collation    string
+	Field string
+	Type  string
+	// Charset is nil if the column doesn't have a charset, or a string indicating the charset name.
+	Charset interface{}
+	// Collation is nil if the column doesn't have a collation, or a string indicating the collation name.
+	Collation    interface{}
 	Null         string
 	Key          string
 	DefaultValue interface{}
@@ -232,13 +238,22 @@ func NewColDesc(col *Column) *ColDesc {
 	var defaultValue interface{}
 	if !mysql.HasNoDefaultValueFlag(col.Flag) {
 		defaultValue = col.GetDefaultValue()
+		if defaultValStr, ok := defaultValue.(string); ok {
+			if (col.Tp == mysql.TypeTimestamp || col.Tp == mysql.TypeDatetime) &&
+				strings.ToUpper(defaultValStr) == strings.ToUpper(ast.CurrentTimestamp) &&
+				col.Decimal > 0 {
+				defaultValue = fmt.Sprintf("%s(%d)", defaultValStr, col.Decimal)
+			}
+		}
 	}
 
 	extra := ""
 	if mysql.HasAutoIncrementFlag(col.Flag) {
 		extra = "auto_increment"
 	} else if mysql.HasOnUpdateNowFlag(col.Flag) {
-		extra = "on update CURRENT_TIMESTAMP"
+		//in order to match the rules of mysql 8.0.16 version
+		//see https://github.com/pingcap/tidb/issues/10337
+		extra = "DEFAULT_GENERATED on update CURRENT_TIMESTAMP" + OptionalFsp(&col.FieldType)
 	} else if col.IsGenerated() {
 		if col.GeneratedStored {
 			extra = "STORED GENERATED"
@@ -247,9 +262,10 @@ func NewColDesc(col *Column) *ColDesc {
 		}
 	}
 
-	return &ColDesc{
+	desc := &ColDesc{
 		Field:        name.O,
 		Type:         col.GetTypeDesc(),
+		Charset:      col.Charset,
 		Collation:    col.Collate,
 		Null:         nullFlag,
 		Key:          keyFlag,
@@ -258,6 +274,11 @@ func NewColDesc(col *Column) *ColDesc {
 		Privileges:   defaultPrivileges,
 		Comment:      col.Comment,
 	}
+	if !field_types.HasCharset(&col.ColumnInfo.FieldType) {
+		desc.Charset = nil
+		desc.Collation = nil
+	}
+	return desc
 }
 
 // ColDescFieldNames returns the fields name in result set for desc and show columns.
@@ -419,4 +440,13 @@ func GetZeroValue(col *model.ColumnInfo) types.Datum {
 		d.SetMysqlJSON(json.CreateBinary(nil))
 	}
 	return d
+}
+
+// OptionalFsp convert a FieldType.Decimal to string.
+func OptionalFsp(fieldType *types.FieldType) string {
+	fsp := fieldType.Decimal
+	if fsp == 0 {
+		return ""
+	}
+	return "(" + strconv.Itoa(fsp) + ")"
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/hanchuanchuan/goInception/ast"
 	"github.com/hanchuanchuan/goInception/expression"
 	"github.com/hanchuanchuan/goInception/model"
+	"github.com/hanchuanchuan/goInception/types/parser_driver"
 	. "github.com/pingcap/check"
 )
 
@@ -66,7 +67,7 @@ func (s *testCacheableSuite) TestCacheable(c *C) {
 	c.Assert(Cacheable(stmt), IsFalse)
 
 	limitStmt := &ast.Limit{
-		Count: &ast.ParamMarkerExpr{},
+		Count: &driver.ParamMarkerExpr{},
 	}
 	stmt = &ast.SelectStmt{
 		Limit: limitStmt,
@@ -74,7 +75,7 @@ func (s *testCacheableSuite) TestCacheable(c *C) {
 	c.Assert(Cacheable(stmt), IsFalse)
 
 	limitStmt = &ast.Limit{
-		Offset: &ast.ParamMarkerExpr{},
+		Offset: &driver.ParamMarkerExpr{},
 	}
 	stmt = &ast.SelectStmt{
 		Limit: limitStmt,

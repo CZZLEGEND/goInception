@@ -54,6 +54,80 @@ var (
 	_ builtinFunc = &builtinIfJSONSig{}
 )
 
+// InferType4ControlFuncs infer result type for builtin IF, IFNULL, NULLIF, LEAD and LAG.
+func InferType4ControlFuncs(lhs, rhs *types.FieldType) *types.FieldType {
+	resultFieldType := &types.FieldType{}
+	if lhs.Tp == mysql.TypeNull {
+		*resultFieldType = *rhs
+		// If both arguments are NULL, make resulting type BINARY(0).
+		if rhs.Tp == mysql.TypeNull {
+			resultFieldType.Tp = mysql.TypeString
+			resultFieldType.Flen, resultFieldType.Decimal = 0, 0
+			types.SetBinChsClnFlag(resultFieldType)
+		}
+	} else if rhs.Tp == mysql.TypeNull {
+		*resultFieldType = *lhs
+	} else {
+		resultFieldType = types.AggFieldType([]*types.FieldType{lhs, rhs})
+		evalType := types.AggregateEvalType([]*types.FieldType{lhs, rhs}, &resultFieldType.Flag)
+		if evalType == types.ETInt {
+			resultFieldType.Decimal = 0
+		} else {
+			if lhs.Decimal == types.UnspecifiedLength || rhs.Decimal == types.UnspecifiedLength {
+				resultFieldType.Decimal = types.UnspecifiedLength
+			} else {
+				resultFieldType.Decimal = mathutil.Max(lhs.Decimal, rhs.Decimal)
+			}
+		}
+		if types.IsNonBinaryStr(lhs) && !types.IsBinaryStr(rhs) {
+			resultFieldType.Charset, resultFieldType.Collate, resultFieldType.Flag = charset.CharsetUTF8MB4, charset.CollationUTF8MB4, 0
+			if mysql.HasBinaryFlag(lhs.Flag) || !types.IsNonBinaryStr(rhs) {
+				resultFieldType.Flag |= mysql.BinaryFlag
+			}
+		} else if types.IsNonBinaryStr(rhs) && !types.IsBinaryStr(lhs) {
+			resultFieldType.Charset, resultFieldType.Collate, resultFieldType.Flag = charset.CharsetUTF8MB4, charset.CollationUTF8MB4, 0
+			if mysql.HasBinaryFlag(rhs.Flag) || !types.IsNonBinaryStr(lhs) {
+				resultFieldType.Flag |= mysql.BinaryFlag
+			}
+		} else if types.IsBinaryStr(lhs) || types.IsBinaryStr(rhs) || !evalType.IsStringKind() {
+			types.SetBinChsClnFlag(resultFieldType)
+		} else {
+			resultFieldType.Charset, resultFieldType.Collate, resultFieldType.Flag = mysql.DefaultCharset, mysql.DefaultCollationName, 0
+		}
+		if evalType == types.ETDecimal || evalType == types.ETInt {
+			lhsUnsignedFlag, rhsUnsignedFlag := mysql.HasUnsignedFlag(lhs.Flag), mysql.HasUnsignedFlag(rhs.Flag)
+			lhsFlagLen, rhsFlagLen := 0, 0
+			if !lhsUnsignedFlag {
+				lhsFlagLen = 1
+			}
+			if !rhsUnsignedFlag {
+				rhsFlagLen = 1
+			}
+			lhsFlen := lhs.Flen - lhsFlagLen
+			rhsFlen := rhs.Flen - rhsFlagLen
+			if lhs.Decimal != types.UnspecifiedLength {
+				lhsFlen -= lhs.Decimal
+			}
+			if lhs.Decimal != types.UnspecifiedLength {
+				rhsFlen -= rhs.Decimal
+			}
+			resultFieldType.Flen = mathutil.Max(lhsFlen, rhsFlen) + resultFieldType.Decimal + 1
+		} else {
+			resultFieldType.Flen = mathutil.Max(lhs.Flen, rhs.Flen)
+		}
+	}
+	// Fix decimal for int and string.
+	resultEvalType := resultFieldType.EvalType()
+	if resultEvalType == types.ETInt {
+		resultFieldType.Decimal = 0
+	} else if resultEvalType == types.ETString {
+		if lhs.Tp != mysql.TypeNull || rhs.Tp != mysql.TypeNull {
+			resultFieldType.Decimal = types.UnspecifiedLength
+		}
+	}
+	return resultFieldType
+}
+
 // inferType4ControlFuncs infer result type for builtin IF, IFNULL && NULLIF.
 func inferType4ControlFuncs(lhs, rhs *types.FieldType) *types.FieldType {
 	resultFieldType := &types.FieldType{}
@@ -68,9 +142,8 @@ func inferType4ControlFuncs(lhs, rhs *types.FieldType) *types.FieldType {
 	} else if rhs.Tp == mysql.TypeNull {
 		*resultFieldType = *lhs
 	} else {
-		var unsignedFlag uint
-		evalType := types.AggregateEvalType([]*types.FieldType{lhs, rhs}, &unsignedFlag)
 		resultFieldType = types.AggFieldType([]*types.FieldType{lhs, rhs})
+		evalType := types.AggregateEvalType([]*types.FieldType{lhs, rhs}, &resultFieldType.Flag)
 		if evalType == types.ETInt {
 			resultFieldType.Decimal = 0
 		} else {

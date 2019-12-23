@@ -24,13 +24,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hanchuanchuan/goInception/ast"
 	"github.com/hanchuanchuan/goInception/config"
 	"github.com/hanchuanchuan/goInception/session"
 	"github.com/hanchuanchuan/goInception/store/mockstore"
 	"github.com/hanchuanchuan/goInception/store/tikv"
 	"github.com/hanchuanchuan/goInception/terror"
 	"github.com/hanchuanchuan/goInception/util/logutil"
+	"github.com/hanchuanchuan/goInception/util/sqlexec"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
@@ -184,7 +184,7 @@ func (ut *benchDB) mustExec(sql string) ([][]string, error) {
 
 // ResultSetToResult converts ast.RecordSet to testkit.Result.
 // It is used to check results of execute statement in binary mode.
-func (ut *benchDB) ResultSetToResult(rs ast.RecordSet) [][]string {
+func (ut *benchDB) ResultSetToResult(rs sqlexec.RecordSet) [][]string {
 	rows, _ := session.GetRows4Test(context.Background(), ut.session, rs)
 	rs.Close()
 	sRows := make([][]string, len(rows))

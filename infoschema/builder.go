@@ -255,7 +255,7 @@ func (b *Builder) InitWithDBInfos(dbInfos []*model.DBInfo, schemaVersion int64) 
 	info := b.is
 	info.schemaMetaVersion = schemaVersion
 	for _, di := range dbInfos {
-		err := b.createSchemaTablesForDB(di)
+		err := b.createSchemaTablesForDB(di, tables.TableFromMeta)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -268,7 +268,9 @@ func (b *Builder) InitWithDBInfos(dbInfos []*model.DBInfo, schemaVersion int64) 
 	return b, nil
 }
 
-func (b *Builder) createSchemaTablesForDB(di *model.DBInfo) error {
+type tableFromMetaFunc func(alloc autoid.Allocator, tblInfo *model.TableInfo) (table.Table, error)
+
+func (b *Builder) createSchemaTablesForDB(di *model.DBInfo, tableFromMeta tableFromMetaFunc) error {
 	schTbls := &schemaTables{
 		dbInfo: di,
 		tables: make(map[string]table.Table, len(di.Tables)),
@@ -289,23 +291,17 @@ func (b *Builder) createSchemaTablesForDB(di *model.DBInfo) error {
 	return nil
 }
 
-// func (b *Builder) createSchemaTablesForPerfSchemaDB() {
-// 	perfSchemaDB := perfschema.GetDBMeta()
-// 	perfSchemaTblNames := &schemaTables{
-// 		dbInfo: perfSchemaDB,
-// 		tables: make(map[string]table.Table, len(perfSchemaDB.Tables)),
-// 	}
-// 	b.is.schemaMap[perfSchemaDB.Name.L] = perfSchemaTblNames
-// 	for _, t := range perfSchemaDB.Tables {
-// 		tbl, ok := perfschema.GetTable(t.Name.O)
-// 		if !ok {
-// 			continue
-// 		}
-// 		perfSchemaTblNames.tables[t.Name.L] = tbl
-// 		bucketIdx := tableBucketIdx(t.ID)
-// 		b.is.sortedTablesBuckets[bucketIdx] = append(b.is.sortedTablesBuckets[bucketIdx], tbl)
-// 	}
-// }
+type virtualTableDriver struct {
+	*model.DBInfo
+	TableFromMeta func(alloc autoid.Allocator, tblInfo *model.TableInfo) (table.Table, error)
+}
+
+var drivers []*virtualTableDriver
+
+// RegisterVirtualTable register virtual tables to the builder.
+func RegisterVirtualTable(dbInfo *model.DBInfo, tableFromMeta tableFromMetaFunc) {
+	drivers = append(drivers, &virtualTableDriver{dbInfo, tableFromMeta})
+}
 
 func (b *Builder) createSchemaTablesForInfoSchemaDB() {
 	infoSchemaSchemaTables := &schemaTables{

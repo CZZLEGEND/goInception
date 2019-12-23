@@ -46,6 +46,8 @@ var (
 	ErrTableExists = terror.ClassSchema.New(codeTableExists, "Table '%s' already exists")
 	// ErrTableDropExists returns for dropping a non-existent table.
 	ErrTableDropExists = terror.ClassSchema.New(codeBadTable, "Unknown table '%s'")
+	// ErrUserDropExists returns for dropping a non-existent user.
+	ErrUserDropExists = terror.ClassSchema.New(codeBadUser, "User %s does not exist.")
 	// ErrColumnExists returns for column already exists.
 	ErrColumnExists = terror.ClassSchema.New(codeColumnExists, "Duplicate column name '%s'")
 	// ErrIndexExists returns for index already exists.
@@ -176,6 +178,15 @@ func (is *infoSchema) TableByName(schema, table model.CIStr) (t table.Table, err
 	return nil, ErrTableNotExists.GenWithStackByArgs(schema, table)
 }
 
+func (is *infoSchema) TableIsView(schema, table model.CIStr) bool {
+	if tbNames, ok := is.schemaMap[schema.L]; ok {
+		if t, ok := tbNames.tables[table.L]; ok {
+			return t.Meta().IsView()
+		}
+	}
+	return false
+}
+
 func (is *infoSchema) TableExists(schema, table model.CIStr) bool {
 	if tbNames, ok := is.schemaMap[schema.L]; ok {
 		if _, ok = tbNames.tables[table.L]; ok {
@@ -189,6 +200,20 @@ func (is *infoSchema) SchemaByID(id int64) (val *model.DBInfo, ok bool) {
 	for _, v := range is.schemaMap {
 		if v.dbInfo.ID == id {
 			return v.dbInfo, true
+		}
+	}
+	return nil, false
+}
+
+func (is *infoSchema) SchemaByTable(tableInfo *model.TableInfo) (val *model.DBInfo, ok bool) {
+	if tableInfo == nil {
+		return nil, false
+	}
+	for _, v := range is.schemaMap {
+		if tbl, ok := v.tables[tableInfo.Name.L]; ok {
+			if tbl.Meta().ID == tableInfo.ID {
+				return v.dbInfo, true
+			}
 		}
 	}
 	return nil, false
@@ -264,6 +289,11 @@ func (h *Handle) Get() InfoSchema {
 	return schema
 }
 
+// IsValid uses to check whether handle value is valid.
+func (h *Handle) IsValid() bool {
+	return h.value.Load() != nil
+}
+
 // EmptyClone creates a new Handle with the same store and memSchema, but the value is not set.
 func (h *Handle) EmptyClone() *Handle {
 	newHandle := &Handle{
@@ -286,6 +316,7 @@ const (
 	codeDatabaseExists   = 1007
 	codeTableExists      = 1050
 	codeBadTable         = 1051
+	codeBadUser          = 3162
 	codeColumnExists     = 1060
 	codeIndexExists      = 1831
 	codeMultiplePriKey   = 1068
@@ -306,6 +337,7 @@ func init() {
 		codeDatabaseExists:      mysql.ErrDBCreateExists,
 		codeTableExists:         mysql.ErrTableExists,
 		codeBadTable:            mysql.ErrBadTable,
+		codeBadUser:             mysql.ErrBadUser,
 		codeColumnExists:        mysql.ErrDupFieldName,
 		codeIndexExists:         mysql.ErrDupIndex,
 		codeMultiplePriKey:      mysql.ErrMultiplePriKey,
@@ -343,5 +375,23 @@ func initInfoSchemaDB() {
 
 // IsMemoryDB checks if the db is in memory.
 func IsMemoryDB(dbName string) bool {
-	return dbName == "information_schema" || dbName == "performance_schema"
+	if dbName == "information_schema" {
+		return true
+	}
+	for _, driver := range drivers {
+		if driver.DBInfo.Name.L == dbName {
+			return true
+		}
+	}
+	return false
+}
+
+// HasAutoIncrementColumn checks whether the table has auto_increment columns, if so, return true and the column name.
+func HasAutoIncrementColumn(tbInfo *model.TableInfo) (bool, string) {
+	for _, col := range tbInfo.Columns {
+		if mysql.HasAutoIncrementFlag(col.Flag) {
+			return true, col.Name.L
+		}
+	}
+	return false, ""
 }

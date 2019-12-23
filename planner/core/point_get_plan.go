@@ -85,8 +85,8 @@ func (p *PointGetPlan) ExplainInfo() string {
 	return buffer.String()
 }
 
-// getChildReqProps gets the required property by child index.
-func (p *PointGetPlan) getChildReqProps(idx int) *property.PhysicalProperty {
+// GetChildReqProps gets the required property by child index.
+func (p *PointGetPlan) GetChildReqProps(idx int) *property.PhysicalProperty {
 	return nil
 }
 
@@ -414,10 +414,10 @@ func tryUpdatePointPlan(ctx sessionctx.Context, updateStmt *ast.UpdateStmt) Plan
 	if orderedList == nil {
 		return nil
 	}
-	updatePlan := &Update{
+	updatePlan := Update{
 		SelectPlan:  fastSelect,
 		OrderedList: orderedList,
-	}
+	}.Init(ctx)
 	updatePlan.SetSchema(fastSelect.schema)
 	return updatePlan
 }

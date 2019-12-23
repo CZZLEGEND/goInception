@@ -16,6 +16,7 @@ package core
 import (
 	"github.com/hanchuanchuan/goInception/planner/property"
 	"github.com/hanchuanchuan/goInception/sessionctx"
+	"github.com/hanchuanchuan/goInception/util/plancodec"
 )
 
 const (
@@ -132,6 +133,15 @@ func (p PhysicalProjection) init(ctx sessionctx.Context, stats *property.StatsIn
 	return &p
 }
 
+// Init initializes PhysicalProjection.
+func (p PhysicalProjection) Init(ctx sessionctx.Context, stats *property.StatsInfo, props ...*property.PhysicalProperty) *PhysicalProjection {
+	p.basePhysicalPlan = newBasePhysicalPlan(ctx, plancodec.TypeProj, &p)
+	p.childrenReqProps = props
+	p.stats = stats
+	return &p
+}
+
+// Init initializes LogicalUnionAll.
 func (p LogicalUnionAll) init(ctx sessionctx.Context) *LogicalUnionAll {
 	p.baseLogicalPlan = newBaseLogicalPlan(ctx, TypeUnion, &p)
 	return &p
@@ -209,7 +219,8 @@ func (p PhysicalMaxOneRow) init(ctx sessionctx.Context, stats *property.StatsInf
 	return &p
 }
 
-func (p Update) init(ctx sessionctx.Context) *Update {
+// Init initializes Update.
+func (p Update) Init(ctx sessionctx.Context) *Update {
 	p.basePlan = newBasePlan(ctx, TypeUpdate)
 	return &p
 }

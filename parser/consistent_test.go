@@ -14,6 +14,7 @@
 package parser
 
 import (
+	// "fmt"
 	"io/ioutil"
 	"os"
 	"path"
@@ -38,10 +39,10 @@ func (s *testConsistentSuite) TestKeywordConsistent(c *C) {
 	c.Assert(err, IsNil)
 	content := string(data)
 
-	reservedKeywordStartMarker := "\t/* The following tokens belong to ReservedKeyword. */"
-	unreservedKeywordStartMarker := "\t/* The following tokens belong to UnReservedKeyword. */"
-	notKeywordTokenStartMarker := "\t/* The following tokens belong to NotKeywordToken. */"
-	tidbKeywordStartMarker := "\t/* The following tokens belong to TiDBKeyword. */"
+	reservedKeywordStartMarker := "\t/* The following tokens belong to ReservedKeyword. Notice: make sure these tokens are contained in ReservedKeyword. */"
+	unreservedKeywordStartMarker := "\t/* The following tokens belong to UnReservedKeyword. Notice: make sure these tokens are contained in UnReservedKeyword. */"
+	notKeywordTokenStartMarker := "\t/* The following tokens belong to NotKeywordToken. Notice: make sure these tokens are contained in NotKeywordToken. */"
+	tidbKeywordStartMarker := "\t/* The following tokens belong to TiDBKeyword. Notice: make sure these tokens are contained in TiDBKeyword. */"
 	identTokenEndMarker := "%token\t<item>"
 
 	reservedKeywords := extractKeywords(content, reservedKeywordStartMarker, unreservedKeywordStartMarker)
@@ -57,7 +58,7 @@ func (s *testConsistentSuite) TestKeywordConsistent(c *C) {
 		c.Assert(tokenMap[k], Equals, tokenMap[v])
 	}
 	keywordCount := len(reservedKeywords) + len(unreservedKeywords) + len(notKeywordTokens) + len(tidbKeywords)
-	c.Assert(len(tokenMap)-len(aliases), Equals, keywordCount)
+	c.Assert(len(tokenMap)-len(aliases), Equals, keywordCount-len(windowFuncTokenMap))
 
 	unreservedCollectionDef := extractKeywordsFromCollectionDef(content, "\nUnReservedKeyword:")
 	c.Assert(unreservedKeywords, DeepEquals, unreservedCollectionDef)

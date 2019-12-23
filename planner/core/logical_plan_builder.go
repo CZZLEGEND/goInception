@@ -1400,6 +1400,13 @@ func checkExprInGroupBy(p LogicalPlan, expr ast.ExprNode, offset int, loc string
 			}
 		}
 	}
+	// Function `any_value` can be used in aggregation, even `ONLY_FULL_GROUP_BY` is set.
+	// See https://dev.mysql.com/doc/refman/5.7/en/miscellaneous-functions.html#function_any-value for details
+	if f, ok := expr.(*ast.FuncCallExpr); ok {
+		if f.FnName.L == ast.AnyValue {
+			return
+		}
+	}
 	colMap := make(map[*expression.Column]struct{}, len(p.Schema().Columns))
 	allColFromExprNode(p, expr, colMap)
 	for col := range colMap {
@@ -1415,7 +1422,7 @@ func (b *PlanBuilder) checkOnlyFullGroupBy(p LogicalPlan, sel *ast.SelectStmt) (
 	} else {
 		err = b.checkOnlyFullGroupByWithOutGroupClause(p, sel.Fields.Fields)
 	}
-	return errors.Trace(err)
+	return err
 }
 
 func (b *PlanBuilder) checkOnlyFullGroupByWithGroupClause(p LogicalPlan, sel *ast.SelectStmt) error {
@@ -1468,7 +1475,7 @@ func (b *PlanBuilder) checkOnlyFullGroupByWithGroupClause(p LogicalPlan, sel *as
 		}
 		switch errExprLoc.Loc {
 		case ErrExprInSelect:
-			return ErrFieldNotInGroupBy.GenWithStackByArgs(errExprLoc.Offset+1, errExprLoc.Loc, sel.Fields.Fields[errExprLoc.Offset].Text())
+			return ErrFieldNotInGroupBy.GenWithStackByArgs(errExprLoc.Offset+1, errExprLoc.Loc, col.DBName.O+"."+col.TblName.O+"."+col.OrigColName.O)
 		case ErrExprInOrderBy:
 			return ErrFieldNotInGroupBy.GenWithStackByArgs(errExprLoc.Offset+1, errExprLoc.Loc, sel.OrderBy.Items[errExprLoc.Offset].Expr.Text())
 		}
@@ -1484,7 +1491,7 @@ func (b *PlanBuilder) checkOnlyFullGroupByWithOutGroupClause(p LogicalPlan, fiel
 		field.Accept(&resolver)
 		err := resolver.Check()
 		if err != nil {
-			return errors.Trace(err)
+			return err
 		}
 	}
 	return nil
@@ -2128,15 +2135,15 @@ func (b *PlanBuilder) buildUpdate(update *ast.UpdateStmt) (Plan, error) {
 	}
 	orderedList, np, err := b.buildUpdateLists(tableList, update.List, p)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, err
 	}
 	p = np
 
-	updt := Update{OrderedList: orderedList}.init(b.ctx)
+	updt := Update{OrderedList: orderedList}.Init(b.ctx)
 	updt.SetSchema(p.Schema())
 	updt.SelectPlan, err = DoOptimize(b.optFlag, p)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, err
 	}
 	updt.ResolveIndices()
 	return updt, nil
@@ -2148,7 +2155,7 @@ func (b *PlanBuilder) buildUpdateLists(tableList []*ast.TableName, list []*ast.A
 	for _, assign := range list {
 		col, _, err := p.findColumn(assign.Column)
 		if err != nil {
-			return nil, nil, errors.Trace(err)
+			return nil, nil, err
 		}
 		columnFullName := fmt.Sprintf("%s.%s.%s", col.DBName.L, col.TblName.L, col.ColName.L)
 		modifyColumns[columnFullName] = struct{}{}

@@ -55,141 +55,7 @@ func (s *testPlanSuite) TestDAGPlanBuilderSimpleCase(c *C) {
 	tests := []struct {
 		sql  string
 		best string
-	}{
-		// Test index hint.
-		{
-			sql:  "select * from t t1 use index(c_d_e)",
-			best: "IndexLookUp(Index(t.c_d_e)[[NULL,+inf]], Table(t))",
-		},
-		// Test ts + Sort vs. DoubleRead + filter.
-		{
-			sql:  "select a from t where a between 1 and 2 order by c",
-			best: "TableReader(Table(t))->Sort->Projection",
-		},
-		// Test DNF condition + Double Read.
-		{
-			sql:  "select * from t where (t.c > 0 and t.c < 2) or (t.c > 4 and t.c < 6) or (t.c > 8 and t.c < 10) or (t.c > 12 and t.c < 14) or (t.c > 16 and t.c < 18)",
-			best: "IndexLookUp(Index(t.c_d_e)[(0 +inf,2 NULL) (4 +inf,6 NULL) (8 +inf,10 NULL) (12 +inf,14 NULL) (16 +inf,18 NULL)], Table(t))",
-		},
-		{
-			sql:  "select * from t where (t.c > 0 and t.c < 1) or (t.c > 2 and t.c < 3) or (t.c > 4 and t.c < 5) or (t.c > 6 and t.c < 7) or (t.c > 9 and t.c < 10)",
-			best: "Dual",
-		},
-		// Test TopN to table branch in double read.
-		{
-			sql:  "select * from t where t.c = 1 and t.e = 1 order by t.b limit 1",
-			best: "IndexLookUp(Index(t.c_d_e)[[1,1]]->Sel([eq(test.t.e, 1)]), Table(t))->TopN([test.t.b],0,1)",
-		},
-		// Test Null Range
-		{
-			sql:  "select * from t where t.e_str is null",
-			best: "IndexLookUp(Index(t.e_d_c_str_prefix)[[NULL,NULL]], Table(t))",
-		},
-		// Test Null Range but the column has not null flag.
-		{
-			sql:  "select * from t where t.c is null",
-			best: "Dual",
-		},
-		// Test TopN to index branch in double read.
-		{
-			sql:  "select * from t where t.c = 1 and t.e = 1 order by t.e limit 1",
-			best: "IndexLookUp(Index(t.c_d_e)[[1,1]]->Sel([eq(test.t.e, 1)]), Table(t))->TopN([test.t.e],0,1)",
-		},
-		// Test TopN to Limit in double read.
-		{
-			sql:  "select * from t where t.c = 1 and t.e = 1 order by t.d limit 1",
-			best: "IndexLookUp(Index(t.c_d_e)[[1,1]]->Sel([eq(test.t.e, 1)])->Limit, Table(t))->Limit",
-		},
-		// Test TopN to Limit in index single read.
-		{
-			sql:  "select c from t where t.c = 1 and t.e = 1 order by t.d limit 1",
-			best: "IndexReader(Index(t.c_d_e)[[1,1]]->Sel([eq(test.t.e, 1)])->Limit)->Limit->Projection",
-		},
-		// Test TopN to Limit in table single read.
-		{
-			sql:  "select c from t order by t.a limit 1",
-			best: "TableReader(Table(t)->Limit)->Limit->Projection",
-		},
-		// Test TopN push down in table single read.
-		{
-			sql:  "select c from t order by t.a + t.b limit 1",
-			best: "TableReader(Table(t)->TopN([plus(test.t.a, test.t.b)],0,1))->TopN([plus(test.t.a, test.t.b)],0,1)->Projection",
-		},
-		// Test Limit push down in table single read.
-		{
-			sql:  "select c from t  limit 1",
-			best: "TableReader(Table(t)->Limit)->Limit",
-		},
-		// Test Limit push down in index single read.
-		{
-			sql:  "select c from t where c = 1 limit 1",
-			best: "IndexReader(Index(t.c_d_e)[[1,1]]->Limit)->Limit",
-		},
-		// Test index single read and Selection.
-		{
-			sql:  "select c from t where c = 1",
-			best: "IndexReader(Index(t.c_d_e)[[1,1]])",
-		},
-		// Test index single read and Sort.
-		{
-			sql:  "select c from t order by c",
-			best: "IndexReader(Index(t.c_d_e)[[NULL,+inf]])",
-		},
-		// Test index single read and Sort.
-		{
-			sql:  "select c from t where c = 1 order by e",
-			best: "IndexReader(Index(t.c_d_e)[[1,1]])->Sort->Projection",
-		},
-		// Test Limit push down in double single read.
-		{
-			sql:  "select c, b from t where c = 1 limit 1",
-			best: "IndexLookUp(Index(t.c_d_e)[[1,1]]->Limit, Table(t))->Limit->Projection",
-		},
-		// Test Selection + Limit push down in double single read.
-		{
-			sql:  "select c, b from t where c = 1 and e = 1 and b = 1 limit 1",
-			best: "IndexLookUp(Index(t.c_d_e)[[1,1]]->Sel([eq(test.t.e, 1)]), Table(t)->Sel([eq(test.t.b, 1)])->Limit)->Limit->Projection",
-		},
-		// Test Order by multi columns.
-		{
-			sql:  "select c from t where c = 1 order by d, c",
-			best: "IndexReader(Index(t.c_d_e)[[1,1]])->Sort->Projection",
-		},
-		// Test for index with length.
-		{
-			sql:  "select c_str from t where e_str = '1' order by d_str, c_str",
-			best: `IndexLookUp(Index(t.e_d_c_str_prefix)[["1","1"]], Table(t))->Sort->Projection`,
-		},
-		// Test PK in index single read.
-		{
-			sql:  "select c from t where t.c = 1 and t.a > 1 order by t.d limit 1",
-			best: "IndexReader(Index(t.c_d_e)[[1,1]]->Sel([gt(test.t.a, 1)])->Limit)->Limit->Projection",
-		},
-		// Test composed index.
-		// FIXME: The TopN didn't be pushed.
-		{
-			sql:  "select c from t where t.c = 1 and t.d = 1 order by t.a limit 1",
-			best: "IndexReader(Index(t.c_d_e)[[1 1,1 1]])->TopN([test.t.a],0,1)->Projection",
-		},
-		// Test PK in index double read.
-		{
-			sql:  "select * from t where t.c = 1 and t.a > 1 order by t.d limit 1",
-			best: "IndexLookUp(Index(t.c_d_e)[[1,1]]->Sel([gt(test.t.a, 1)])->Limit, Table(t))->Limit",
-		},
-		// Test index filter condition push down.
-		{
-			sql:  "select * from t use index(e_d_c_str_prefix) where t.c_str = 'abcdefghijk' and t.d_str = 'd' and t.e_str = 'e'",
-			best: "IndexLookUp(Index(t.e_d_c_str_prefix)[[\"e\" \"d\" \"abcdefghij\",\"e\" \"d\" \"abcdefghij\"]], Table(t)->Sel([eq(test.t.c_str, abcdefghijk)]))",
-		},
-		{
-			sql:  "select * from t use index(e_d_c_str_prefix) where t.e_str = b'1110000'",
-			best: "IndexLookUp(Index(t.e_d_c_str_prefix)[[\"p\",\"p\"]], Table(t))",
-		},
-		{
-			sql:  "select * from (select * from t use index() order by b) t left join t t1 on t.a=t1.a limit 10",
-			best: "IndexJoin{TableReader(Table(t)->TopN([test.t.b],0,10))->TopN([test.t.b],0,10)->TableReader(Table(t))}(test.t.a,t1.a)->Limit",
-		},
-	}
+	}{}
 	for i, tt := range tests {
 		comment := Commentf("case:%v sql:%s", i, tt.sql)
 		stmt, err := s.ParseOneStmt(tt.sql, "", "")
@@ -436,53 +302,11 @@ func (s *testPlanSuite) TestDAGPlanBuilderSubquery(c *C) {
 	c.Assert(err, IsNil)
 	_, err = se.Execute(context.Background(), "use test")
 	c.Assert(err, IsNil)
-
+	se.Execute(context.Background(), "set sql_mode='STRICT_TRANS_TABLES'") // disable only full group by
 	tests := []struct {
 		sql  string
 		best string
-	}{
-		// Test join key with cast.
-		{
-			sql:  "select * from t where exists (select s.a from t s having sum(s.a) = t.a )",
-			best: "LeftHashJoin{TableReader(Table(t))->Projection->TableReader(Table(t)->StreamAgg)->StreamAgg}(cast(test.t.a),sel_agg_1)->Projection",
-		},
-		{
-			sql:  "select * from t where exists (select s.a from t s having sum(s.a) = t.a ) order by t.a",
-			best: "LeftHashJoin{TableReader(Table(t))->Projection->TableReader(Table(t)->StreamAgg)->StreamAgg}(cast(test.t.a),sel_agg_1)->Projection->Sort",
-		},
-		// FIXME: Report error by resolver.
-		//{
-		//	sql:  "select * from t where exists (select s.a from t s having s.a = t.a ) order by t.a",
-		//	best: "SemiJoin{TableReader(Table(t))->Projection->TableReader(Table(t)->HashAgg)->HashAgg}(cast(test.t.a),sel_agg_1)->Projection->Sort",
-		//},
-		{
-			sql:  "select * from t where a in (select s.a from t s) order by t.a",
-			best: "MergeSemiJoin{TableReader(Table(t))->TableReader(Table(t))}(test.t.a,s.a)",
-		},
-		// Test Nested sub query.
-		{
-			sql:  "select * from t where exists (select s.a from t s where s.c in (select c from t as k where k.d = s.d) having sum(s.a) = t.a )",
-			best: "LeftHashJoin{TableReader(Table(t))->Projection->MergeSemiJoin{IndexReader(Index(t.c_d_e)[[NULL,+inf]])->IndexReader(Index(t.c_d_e)[[NULL,+inf]])}(s.c,k.c)(s.d,k.d)->StreamAgg}(cast(test.t.a),sel_agg_1)->Projection",
-		},
-		// Test Semi Join + Order by.
-		{
-			sql:  "select * from t where a in (select a from t) order by b",
-			best: "MergeSemiJoin{TableReader(Table(t))->TableReader(Table(t))}(test.t.a,test.t.a)->Sort",
-		},
-		// Test Apply.
-		{
-			sql:  "select t.c in (select count(*) from t s , t t1 where s.a = t.a and s.a = t1.a) from t",
-			best: "Apply{TableReader(Table(t))->IndexJoin{TableReader(Table(t))->TableReader(Table(t)->Sel([eq(t1.a, test.t.a)]))}(s.a,t1.a)->StreamAgg}->Projection",
-		},
-		{
-			sql:  "select (select count(*) from t s , t t1 where s.a = t.a and s.a = t1.a) from t",
-			best: "LeftHashJoin{TableReader(Table(t))->MergeInnerJoin{TableReader(Table(t))->TableReader(Table(t))}(s.a,t1.a)->StreamAgg}(test.t.a,s.a)->Projection->Projection",
-		},
-		{
-			sql:  "select (select count(*) from t s , t t1 where s.a = t.a and s.a = t1.a) from t order by t.a",
-			best: "LeftHashJoin{TableReader(Table(t))->MergeInnerJoin{TableReader(Table(t))->TableReader(Table(t))}(s.a,t1.a)->StreamAgg}(test.t.a,s.a)->Projection->Sort->Projection",
-		},
-	}
+	}{}
 	for _, tt := range tests {
 		comment := Commentf("for %s", tt.sql)
 		stmt, err := s.ParseOneStmt(tt.sql, "", "")
@@ -782,144 +606,13 @@ func (s *testPlanSuite) TestDAGPlanBuilderAgg(c *C) {
 	se, err := session.CreateSession4Test(store)
 	c.Assert(err, IsNil)
 	se.Execute(context.Background(), "use test")
+	se.Execute(context.Background(), "set sql_mode='STRICT_TRANS_TABLES'") // disable only full group by
 	c.Assert(err, IsNil)
 
 	tests := []struct {
 		sql  string
 		best string
-	}{
-		// Test distinct.
-		{
-			sql:  "select distinct b from t",
-			best: "TableReader(Table(t)->HashAgg)->HashAgg",
-		},
-		{
-			sql:  "select count(*) from (select * from t order by b) t group by b",
-			best: "TableReader(Table(t))->Sort->StreamAgg",
-		},
-		{
-			sql:  "select count(*), x from (select b as bbb, a + 1 as x from (select * from t order by b) t) t group by bbb",
-			best: "TableReader(Table(t))->Sort->Projection->StreamAgg",
-		},
-		// Test agg + table.
-		{
-			sql:  "select sum(a), avg(b + c) from t group by d",
-			best: "TableReader(Table(t)->HashAgg)->HashAgg",
-		},
-		{
-			sql:  "select sum(distinct a), avg(b + c) from t group by d",
-			best: "TableReader(Table(t))->HashAgg",
-		},
-		//  Test group by (c + d)
-		{
-			sql:  "select sum(e), avg(e + c) from t where c = 1 group by (c + d)",
-			best: "IndexReader(Index(t.c_d_e)[[1,1]]->HashAgg)->HashAgg",
-		},
-		// Test stream agg + index single.
-		{
-			sql:  "select sum(e), avg(e + c) from t where c = 1 group by c",
-			best: "IndexReader(Index(t.c_d_e)[[1,1]]->StreamAgg)->StreamAgg",
-		},
-		// Test hash agg + index single.
-		{
-			sql:  "select sum(e), avg(e + c) from t where c = 1 group by d",
-			best: "IndexReader(Index(t.c_d_e)[[1,1]]->HashAgg)->HashAgg",
-		},
-		// Test hash agg + index double.
-		{
-			sql:  "select sum(e), avg(b + c) from t where c = 1 and e = 1 group by d",
-			best: "IndexLookUp(Index(t.c_d_e)[[1,1]]->Sel([eq(test.t.e, 1)]), Table(t))->HashAgg",
-		},
-		// Test stream agg + index double.
-		{
-			sql:  "select sum(e), avg(b + c) from t where c = 1 and b = 1 group by c",
-			best: "IndexLookUp(Index(t.c_d_e)[[1,1]], Table(t)->Sel([eq(test.t.b, 1)]))->StreamAgg",
-		},
-		// Test hash agg + order.
-		{
-			sql:  "select sum(e) as k, avg(b + c) from t where c = 1 and b = 1 and e = 1 group by d order by k",
-			best: "IndexLookUp(Index(t.c_d_e)[[1,1]]->Sel([eq(test.t.e, 1)]), Table(t)->Sel([eq(test.t.b, 1)]))->HashAgg->Sort",
-		},
-		// Test stream agg + order.
-		{
-			sql:  "select sum(e) as k, avg(b + c) from t where c = 1 and b = 1 and e = 1 group by c order by k",
-			best: "IndexLookUp(Index(t.c_d_e)[[1,1]]->Sel([eq(test.t.e, 1)]), Table(t)->Sel([eq(test.t.b, 1)]))->StreamAgg->Sort",
-		},
-		// Test agg can't push down.
-		{
-			sql:  "select sum(to_base64(e)) from t where c = 1",
-			best: "IndexReader(Index(t.c_d_e)[[1,1]])->StreamAgg",
-		},
-		{
-			sql:  "select (select count(1) k from t s where s.a = t.a having k != 0) from t",
-			best: "MergeLeftOuterJoin{TableReader(Table(t))->TableReader(Table(t))->Projection}(test.t.a,s.a)->Projection->Projection",
-		},
-		// Test stream agg with multi group by columns.
-		{
-			sql:  "select sum(to_base64(e)) from t group by e,d,c order by c",
-			best: "IndexReader(Index(t.c_d_e)[[NULL,+inf]])->StreamAgg->Projection",
-		},
-		{
-			sql:  "select sum(e+1) from t group by e,d,c order by c",
-			best: "IndexReader(Index(t.c_d_e)[[NULL,+inf]]->StreamAgg)->StreamAgg->Projection",
-		},
-		{
-			sql:  "select sum(to_base64(e)) from t group by e,d,c order by c,e",
-			best: "IndexReader(Index(t.c_d_e)[[NULL,+inf]])->StreamAgg->Sort->Projection",
-		},
-		{
-			sql:  "select sum(e+1) from t group by e,d,c order by c,e",
-			best: "IndexReader(Index(t.c_d_e)[[NULL,+inf]]->StreamAgg)->StreamAgg->Sort->Projection",
-		},
-		// Test stream agg + limit or sort
-		{
-			sql:  "select count(*) from t group by g order by g limit 10",
-			best: "IndexReader(Index(t.g)[[NULL,+inf]]->StreamAgg)->StreamAgg->Limit->Projection",
-		},
-		{
-			sql:  "select count(*) from t group by g limit 10",
-			best: "IndexReader(Index(t.g)[[NULL,+inf]]->StreamAgg)->StreamAgg->Limit",
-		},
-		{
-			sql:  "select count(*) from t group by g order by g",
-			best: "IndexReader(Index(t.g)[[NULL,+inf]]->StreamAgg)->StreamAgg->Projection",
-		},
-		{
-			sql:  "select count(*) from t group by g order by g desc limit 1",
-			best: "IndexReader(Index(t.g)[[NULL,+inf]]->StreamAgg)->StreamAgg->Limit->Projection",
-		},
-		// Test hash agg + limit or sort
-		{
-			sql:  "select count(*) from t group by b order by b limit 10",
-			best: "TableReader(Table(t)->HashAgg)->HashAgg->TopN([test.t.b],0,10)->Projection",
-		},
-		{
-			sql:  "select count(*) from t group by b order by b",
-			best: "TableReader(Table(t)->HashAgg)->HashAgg->Sort->Projection",
-		},
-		{
-			sql:  "select count(*) from t group by b limit 10",
-			best: "TableReader(Table(t)->HashAgg)->HashAgg->Limit",
-		},
-		// Test merge join + stream agg
-		{
-			sql:  "select sum(a.g), sum(b.g) from t a join t b on a.g = b.g group by a.g",
-			best: "MergeInnerJoin{IndexReader(Index(t.g)[[NULL,+inf]])->IndexReader(Index(t.g)[[NULL,+inf]])}(a.g,b.g)->StreamAgg",
-		},
-		// Test index join + stream agg
-		{
-			sql:  "select /*+ tidb_inlj(a,b) */ sum(a.g), sum(b.g) from t a join t b on a.g = b.g and a.g > 60 group by a.g order by a.g limit 1",
-			best: "IndexJoin{IndexReader(Index(t.g)[(60,+inf]])->IndexReader(Index(t.g)[[NULL,+inf]]->Sel([gt(b.g, 60)]))}(a.g,b.g)->StreamAgg->Limit->Projection",
-		},
-		{
-			sql:  "select sum(a.g), sum(b.g) from t a join t b on a.g = b.g and a.a>5 group by a.g order by a.g limit 1",
-			best: "IndexJoin{IndexReader(Index(t.g)[[NULL,+inf]]->Sel([gt(a.a, 5)]))->IndexReader(Index(t.g)[[NULL,+inf]])}(a.g,b.g)->StreamAgg->Limit->Projection",
-		},
-		{
-			sql:  "select sum(d) from t",
-			best: "TableReader(Table(t)->StreamAgg)->StreamAgg",
-		},
-	}
+	}{}
 	for _, tt := range tests {
 		comment := Commentf("for %s", tt.sql)
 		stmt, err := s.ParseOneStmt(tt.sql, "", "")
@@ -1176,52 +869,11 @@ func (s *testPlanSuite) TestAggEliminater(c *C) {
 	c.Assert(err, IsNil)
 	_, err = se.Execute(context.Background(), "use test")
 	c.Assert(err, IsNil)
-
+	se.Execute(context.Background(), "set sql_mode='STRICT_TRANS_TABLES'") // disable only full group by
 	tests := []struct {
 		sql  string
 		best string
-	}{
-		// Max to Limit + Sort-Desc.
-		{
-			sql:  "select max(a) from t;",
-			best: "TableReader(Table(t)->Limit)->Limit->StreamAgg",
-		},
-		// Min to Limit + Sort.
-		{
-			sql:  "select min(a) from t;",
-			best: "TableReader(Table(t)->Limit)->Limit->StreamAgg",
-		},
-		// Min to Limit + Sort, and isnull() should be added.
-		{
-			sql:  "select min(c_str) from t;",
-			best: "IndexReader(Index(t.c_d_e_str)[[-inf,+inf]]->Limit)->Limit->StreamAgg",
-		},
-		// Do nothing to max + firstrow.
-		{
-			sql:  "select max(a), b from t;",
-			best: "TableReader(Table(t)->StreamAgg)->StreamAgg",
-		},
-		// If max/min contains scalar function, we can still do transformation.
-		{
-			sql:  "select max(a+1) from t;",
-			best: "TableReader(Table(t)->Sel([not(isnull(plus(test.t.a, 1)))])->TopN([plus(test.t.a, 1) true],0,1))->TopN([plus(test.t.a, 1) true],0,1)->StreamAgg",
-		},
-		// Do nothing to max+min.
-		{
-			sql:  "select max(a), min(a) from t;",
-			best: "TableReader(Table(t)->StreamAgg)->StreamAgg",
-		},
-		// Do nothing to max with groupby.
-		{
-			sql:  "select max(a) from t group by b;",
-			best: "TableReader(Table(t)->HashAgg)->HashAgg",
-		},
-		// If inner is not a data source, we can still do transformation.
-		{
-			sql:  "select max(a) from (select t1.a from t t1 join t t2 on t1.a=t2.a) t",
-			best: "IndexJoin{TableReader(Table(t))->TableReader(Table(t))}(t1.a,t2.a)->Limit->StreamAgg",
-		},
-	}
+	}{}
 
 	for _, tt := range tests {
 		comment := Commentf("for %s", tt.sql)

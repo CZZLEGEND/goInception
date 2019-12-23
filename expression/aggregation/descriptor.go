@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"strings"
 
 	"github.com/cznic/mathutil"
 	"github.com/hanchuanchuan/goInception/ast"
@@ -33,12 +32,7 @@ import (
 
 // AggFuncDesc describes an aggregation function signature, only used in planner.
 type AggFuncDesc struct {
-	// Name represents the aggregation function name.
-	Name string
-	// Args represents the arguments of the aggregation function.
-	Args []expression.Expression
-	// RetTp represents the return type of the aggregation function.
-	RetTp *types.FieldType
+	baseFuncDesc
 	// Mode represents the execution mode of the aggregation function.
 	Mode AggFunctionMode
 	// HasDistinct represents whether the aggregation function contains distinct attribute.
@@ -47,13 +41,8 @@ type AggFuncDesc struct {
 
 // NewAggFuncDesc creates an aggregation function signature descriptor.
 func NewAggFuncDesc(ctx sessionctx.Context, name string, args []expression.Expression, hasDistinct bool) *AggFuncDesc {
-	a := &AggFuncDesc{
-		Name:        strings.ToLower(name),
-		Args:        args,
-		HasDistinct: hasDistinct,
-	}
-	a.typeInfer(ctx)
-	return a
+	b, _ := newBaseFuncDesc(ctx, name, args)
+	return &AggFuncDesc{baseFuncDesc: b, HasDistinct: hasDistinct}
 }
 
 // Equal checks whether two aggregation function signatures are equal.
@@ -93,11 +82,11 @@ func (a *AggFuncDesc) Split(ordinal []int) (finalAggDesc *AggFuncDesc) {
 		return
 	}
 	finalAggDesc = &AggFuncDesc{
-		Name:        a.Name,
 		Mode:        FinalMode, // We only support FinalMode now in final phase.
 		HasDistinct: a.HasDistinct,
-		RetTp:       a.RetTp,
 	}
+	finalAggDesc.Name = a.Name
+	finalAggDesc.RetTp = a.RetTp
 	switch a.Name {
 	case ast.AggFuncAvg:
 		args := make([]expression.Expression, 0, 2)

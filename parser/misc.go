@@ -624,16 +624,14 @@ var tokenMap = map[string]int{
 	"BINDINGS":                 bindings,
 	"EXPR_PUSHDOWN_BLACKLIST":  exprPushdownBlacklist,
 	"OPT_RULE_BLACKLIST":       optRuleBlacklist,
-
-	"INCEPTION":              inception,
-	"INCEPTION_MAGIC_START":  inception_magic_start,
-	"INCEPTION_MAGIC_COMMIT": inception_magic_commit,
-
-	"OSC":         osc,
-	"OSC_PERCENT": osc_percent,
-	"STOP":        stop,
-	"PAUSE":       pause,
-	"RESUME":      resume,
+	"INCEPTION":                inception,
+	"INCEPTION_MAGIC_START":    inception_magic_start,
+	"INCEPTION_MAGIC_COMMIT":   inception_magic_commit,
+	"OSC":                      osc,
+	"OSC_PERCENT":              osc_percent,
+	"STOP":                     stop,
+	"PAUSE":                    pause,
+	"RESUME":                   resume,
 }
 
 // See https://dev.mysql.com/doc/refman/5.7/en/function-resolution.html for details

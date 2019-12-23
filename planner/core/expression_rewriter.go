@@ -618,38 +618,6 @@ func (er *expressionRewriter) handleInSubquery(v *ast.PatternInExpr) (ast.Node, 
 		er.err = expression.ErrOperandColumns.GenWithStackByArgs(lLen)
 		return v, true
 	}
-	// Sometimes we can unfold the in subquery. For example, a in (select * from t) can rewrite to `a in (1,2,3,4)`.
-	// TODO: Now we cannot add it to CBO framework. Instead, user can set a session variable to open this optimization.
-	// We will improve our CBO framework in future.
-	if lLen == 1 && er.ctx.GetSessionVars().AllowInSubqueryUnFolding && len(np.extractCorrelatedCols()) == 0 {
-		physicalPlan, err1 := DoOptimize(er.b.optFlag, np)
-		if err1 != nil {
-			er.err = errors.Trace(err1)
-			return v, true
-		}
-		rows, err1 := EvalSubquery(physicalPlan, er.b.is, er.b.ctx)
-		if err1 != nil {
-			er.err = errors.Trace(err1)
-			return v, true
-		}
-		for _, row := range rows {
-			con := &expression.Constant{
-				Value:   row[0],
-				RetType: np.Schema().Columns[0].GetType(),
-			}
-			er.ctxStack = append(er.ctxStack, con)
-		}
-		listLen := len(rows)
-		if listLen == 0 {
-			er.ctxStack[len(er.ctxStack)-1] = &expression.Constant{
-				Value:   types.NewDatum(v.Not),
-				RetType: types.NewFieldType(mysql.TypeTiny),
-			}
-		} else {
-			er.inToExpression(listLen, v.Not, &v.Type)
-		}
-		return v, true
-	}
 	var rexpr expression.Expression
 	if np.Schema().Len() == 1 {
 		rexpr = np.Schema().Columns[0]
@@ -1250,13 +1218,20 @@ func (er *expressionRewriter) toColumn(v *ast.ColumnName) {
 	if join, ok := er.p.(*LogicalJoin); ok && join.redundantSchema != nil {
 		column, err := join.redundantSchema.FindColumn(v)
 		if err != nil {
-			er.err = errors.Trace(err)
+			er.err = err
 			return
 		}
 		if column != nil {
 			er.ctxStack = append(er.ctxStack, column)
 			return
 		}
+	}
+	if _, ok := er.p.(*LogicalUnionAll); ok && v.Table.O != "" {
+		er.err = ErrTablenameNotAllowedHere.GenWithStackByArgs(v.Table.O, "SELECT", clauseMsg[er.b.curClause])
+		return
+	}
+	if er.b.curClause == globalOrderByClause {
+		er.b.curClause = orderByClause
 	}
 	er.err = ErrUnknownColumn.GenWithStackByArgs(v.String(), clauseMsg[er.b.curClause])
 }

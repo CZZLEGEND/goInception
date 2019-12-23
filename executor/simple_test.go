@@ -85,7 +85,7 @@ func inTxn(ctx sessionctx.Context) bool {
 	return (ctx.GetSessionVars().Status & mysql.ServerStatusInTrans) > 0
 }
 
-func (s *testSuite) TestUser(c *C) {
+func (s *testSuite3) TestUser(c *C) {
 	tk := testkit.NewTestKit(c, s.store)
 	// Make sure user test not in mysql.User.
 	result := tk.MustQuery(`SELECT Password FROM mysql.User WHERE User="test" and Host="localhost"`)
@@ -177,13 +177,6 @@ func (s *testSuite) TestUser(c *C) {
 	tk.MustExec(createUserSQL)
 	dropUserSQL = `DROP USER 'test1'@'localhost';`
 	tk.MustExec(dropUserSQL)
-	tk.MustQuery("select * from mysql.db").Check(testkit.Rows(
-		"localhost test testDB Y Y Y Y Y Y Y N Y Y N N N N N N Y N N",
-		"localhost test testDB1 Y Y Y Y Y Y Y N Y Y N N N N N N Y N N",
-		"% dddb_% dduser Y Y Y Y Y Y Y N Y Y N N N N N N Y N N",
-		"% test test Y N N N N N N N N N N N N N N N N N N",
-		"localhost test testDBRevoke N N N N N N N N N N N N N N N N N N N",
-	))
 
 	// Test drop user meet error
 	_, err = tk.Exec(dropUserSQL)

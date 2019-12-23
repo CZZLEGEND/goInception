@@ -33,6 +33,7 @@ import (
 	"github.com/hanchuanchuan/goInception/store/mockstore"
 	"github.com/hanchuanchuan/goInception/terror"
 	"github.com/hanchuanchuan/goInception/util/admin"
+	"github.com/hanchuanchuan/goInception/util/sqlexec"
 	"github.com/hanchuanchuan/goInception/util/testkit"
 	"github.com/hanchuanchuan/goInception/util/testleak"
 	. "github.com/pingcap/check"
@@ -229,7 +230,7 @@ func (s *testStateChangeSuite) test(c *C, tableName, alterTableSQL string, testI
 type stateCase struct {
 	session            session.Session
 	rawStmt            ast.StmtNode
-	stmt               ast.Statement
+	stmt               sqlexec.Statement
 	expectedExecErr    error
 	expectedCompileErr error
 }

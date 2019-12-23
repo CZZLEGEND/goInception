@@ -102,6 +102,16 @@ func GetAllCharsets() []*Desc {
 	return descs
 }
 
+// GetSupportedCharsets gets descriptions for all charsets supported so far.
+func GetSupportedCharsets() []*Desc {
+	return descs
+}
+
+// GetSupportedCollations gets information for all collations supported so far.
+func GetSupportedCollations() []*Collation {
+	return supportedCollations
+}
+
 // ValidCharsetAndCollation checks the charset and the collation validity
 // and returns a boolean.
 func ValidCharsetAndCollation(cs string, co string) bool {

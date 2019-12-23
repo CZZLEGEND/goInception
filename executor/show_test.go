@@ -206,14 +206,6 @@ func (s *testSuite) TestShow(c *C) {
 	result = tk.MustQuery("SHOW index from show_index from test where Column_name = 'c'")
 	c.Check(result.Rows(), HasLen, 1)
 
-	// Test show full columns
-	// for issue https://github.com/hanchuanchuan/goInception/issues/4224
-	tk.MustExec(`drop table if exists show_test_comment`)
-	tk.MustExec(`create table show_test_comment (id int not null default 0 comment "show_test_comment_id")`)
-	tk.MustQuery(`show full columns from show_test_comment`).Check(testutil.RowsWithSep("|",
-		"id|int(11)|binary|NO||0||select,insert,update,references|show_test_comment_id",
-	))
-
 	// Test show create table with AUTO_INCREMENT option
 	// for issue https://github.com/hanchuanchuan/goInception/issues/3747
 	tk.MustExec(`drop table if exists show_auto_increment`)
@@ -399,16 +391,6 @@ func (s *testSuite) TestShow(c *C) {
 			") ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin COMPRESSION='zlib'",
 	))
 
-	// Test show create table year type
-	tk.MustExec(`drop table if exists t`)
-	tk.MustExec(`create table t(y year unsigned signed zerofill zerofill, x int, primary key(y));`)
-	tk.MustQuery(`show create table t`).Check(testutil.RowsWithSep("|",
-		"t CREATE TABLE `t` (\n"+
-			"  `y` year NOT NULL,\n"+
-			"  `x` int(11) DEFAULT NULL,\n"+
-			"  PRIMARY KEY (`y`)\n"+
-			") ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_bin"))
-
 	// Test show create table with zerofill flag
 	tk.MustExec(`drop table if exists t`)
 	tk.MustExec(`create table t(id int primary key, val tinyint(10) zerofill);`)
@@ -570,11 +552,11 @@ func (s *testSuite) TestShow2(c *C) {
 
 	tk.MustQuery("show databases like 'test'").Check(testkit.Rows("test"))
 
-	tk.MustExec(`grant all on *.* to 'root'@'%'`)
-	tk.MustQuery("show grants").Check(testkit.Rows(`GRANT ALL PRIVILEGES ON *.* TO 'root'@'%'`))
+	// tk.MustExec(`grant all on *.* to 'root'@'%'`)
+	// tk.MustQuery("show grants").Check(testkit.Rows(`GRANT ALL PRIVILEGES ON *.* TO 'root'@'%'`))
 
-	tk.MustQuery("show grants for current_user()").Check(testkit.Rows(`GRANT ALL PRIVILEGES ON *.* TO 'root'@'%'`))
-	tk.MustQuery("show grants for current_user").Check(testkit.Rows(`GRANT ALL PRIVILEGES ON *.* TO 'root'@'%'`))
+	// tk.MustQuery("show grants for current_user()").Check(testkit.Rows(`GRANT ALL PRIVILEGES ON *.* TO 'root'@'%'`))
+	// tk.MustQuery("show grants for current_user").Check(testkit.Rows(`GRANT ALL PRIVILEGES ON *.* TO 'root'@'%'`))
 }
 
 func (s *testSuite) TestCollation(c *C) {

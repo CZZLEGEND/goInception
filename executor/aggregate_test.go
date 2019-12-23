@@ -24,6 +24,7 @@ func (s *testSuite) TestAggregation(c *C) {
 	tk := testkit.NewTestKit(c, s.store)
 	tk.MustExec("set @@tidb_hash_join_concurrency=1")
 	tk.MustExec("use test")
+	tk.MustExec("set sql_mode='STRICT_TRANS_TABLES'") // disable only-full-group-by
 	tk.MustExec("drop table if exists t")
 	tk.MustExec("create table t (c int, d int)")
 	tk.MustExec("insert t values (NULL, 1)")
@@ -237,22 +238,16 @@ func (s *testSuite) TestAggregation(c *C) {
 	result = tk.MustQuery("SELECT COALESCE ( + 1, cor0.col0 ) + - CAST( NULL AS DECIMAL ) FROM t2, t1 AS cor0, t2 AS cor1 GROUP BY cor0.col1")
 	result.Check(testkit.Rows("<nil>", "<nil>"))
 
-	result = tk.MustQuery("select count(*) from information_schema.columns")
-	// When adding new memory columns in information_schema, please update this variable.
-	// columnCountOfAllInformationSchemaTables := "757"
-	columnCountOfAllInformationSchemaTables := "470"
-	result.Check(testkit.Rows(columnCountOfAllInformationSchemaTables))
-
 	tk.MustExec("drop table if exists t1")
 	tk.MustExec("drop table if exists t2")
 	tk.MustExec("create table t1 (c1 int)")
 	tk.MustExec("create table t2 (c1 int)")
 	tk.MustExec("insert into t1 values(3), (2)")
 	tk.MustExec("insert into t2 values(1), (2)")
-	tk.MustExec("set @@session.tidb_opt_insubquery_unfold = 1")
+	tk.MustExec("set @@session.tidb_opt_insubq_to_join_and_agg = 0")
 	result = tk.MustQuery("select sum(c1 in (select * from t2)) from t1")
 	result.Check(testkit.Rows("1"))
-	tk.MustExec("set @@session.tidb_opt_insubquery_unfold = 0")
+	tk.MustExec("set @@session.tidb_opt_insubq_to_join_and_agg = 1")
 	result = tk.MustQuery("select sum(c1 in (select * from t2)) from t1")
 	result.Check(testkit.Rows("1"))
 	result = tk.MustQuery("select sum(c1) k from (select * from t1 union all select * from t2)t group by c1 * 2 order by k")

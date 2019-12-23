@@ -29,6 +29,7 @@ import (
 	"github.com/hanchuanchuan/goInception/util/auth"
 	"github.com/hanchuanchuan/goInception/util/chunk"
 	"github.com/hanchuanchuan/goInception/util/sqlexec"
+	"github.com/ngaut/pools"
 	"github.com/pingcap/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
@@ -45,6 +46,24 @@ type SimpleExec struct {
 	Statement ast.StmtNode
 	done      bool
 	is        infoschema.InfoSchema
+}
+
+func (e *SimpleExec) getSysSession() (sessionctx.Context, error) {
+	dom := domain.GetDomain(e.ctx)
+	sysSessionPool := dom.SysSessionPool()
+	ctx, err := sysSessionPool.Get()
+	if err != nil {
+		return nil, err
+	}
+	restrictedCtx := ctx.(sessionctx.Context)
+	restrictedCtx.GetSessionVars().InRestrictedSQL = true
+	return restrictedCtx, nil
+}
+
+func (e *SimpleExec) releaseSysSession(ctx sessionctx.Context) {
+	dom := domain.GetDomain(e.ctx)
+	sysSessionPool := dom.SysSessionPool()
+	sysSessionPool.Put(ctx.(pools.Resource))
 }
 
 // Next implements the Executor Next interface.
@@ -218,56 +237,111 @@ func (e *SimpleExec) executeAlterUser(s *ast.AlterUserStmt) error {
 
 func (e *SimpleExec) executeDropUser(s *ast.DropUserStmt) error {
 	failedUsers := make([]string, 0, len(s.UserList))
+	notExistUsers := make([]string, 0, len(s.UserList))
+	sysSession, err := e.getSysSession()
+	defer e.releaseSysSession(sysSession)
+	if err != nil {
+		return err
+	}
+	sqlExecutor := sysSession.(sqlexec.SQLExecutor)
+
 	for _, user := range s.UserList {
 		exists, err := userExists(e.ctx, user.Username, user.Hostname)
 		if err != nil {
-			return errors.Trace(err)
+			return err
 		}
 		if !exists {
-			if !s.IfExists {
-				failedUsers = append(failedUsers, user.String())
-			}
+			notExistUsers = append(notExistUsers, user.String())
 			continue
 		}
 
 		// begin a transaction to delete a user.
-		if _, err := e.ctx.(sqlexec.SQLExecutor).Execute(context.Background(), "begin"); err != nil {
-			return errors.Trace(err)
+		if _, err := sqlExecutor.Execute(context.Background(), "begin"); err != nil {
+			return err
 		}
-		sql := fmt.Sprintf(`DELETE FROM %s.%s WHERE Host = "%s" and User = "%s";`, mysql.SystemDB, mysql.UserTable, user.Hostname, user.Username)
-		if _, err := e.ctx.(sqlexec.SQLExecutor).Execute(context.Background(), sql); err != nil {
+		sql := fmt.Sprintf(`DELETE FROM %s.%s WHERE Host = '%s' and User = '%s';`, mysql.SystemDB, mysql.UserTable, user.Hostname, user.Username)
+		if _, err := sqlExecutor.Execute(context.Background(), sql); err != nil {
 			failedUsers = append(failedUsers, user.String())
-			if _, err := e.ctx.(sqlexec.SQLExecutor).Execute(context.Background(), "rollback"); err != nil {
-				return errors.Trace(err)
+			if _, err := sqlExecutor.Execute(context.Background(), "rollback"); err != nil {
+				return err
 			}
 			continue
 		}
 
 		// delete privileges from mysql.db
-		sql = fmt.Sprintf(`DELETE FROM %s.%s WHERE Host = "%s" and User = "%s";`, mysql.SystemDB, mysql.DBTable, user.Hostname, user.Username)
-		if _, err := e.ctx.(sqlexec.SQLExecutor).Execute(context.Background(), sql); err != nil {
+		sql = fmt.Sprintf(`DELETE FROM %s.%s WHERE Host = '%s' and User = '%s';`, mysql.SystemDB, mysql.DBTable, user.Hostname, user.Username)
+		if _, err := sqlExecutor.Execute(context.Background(), sql); err != nil {
 			failedUsers = append(failedUsers, user.String())
-			if _, err := e.ctx.(sqlexec.SQLExecutor).Execute(context.Background(), "rollback"); err != nil {
-				return errors.Trace(err)
+			if _, err := sqlExecutor.Execute(context.Background(), "rollback"); err != nil {
+				return err
 			}
 			continue
 		}
 
 		// delete privileges from mysql.tables_priv
-		sql = fmt.Sprintf(`DELETE FROM %s.%s WHERE Host = "%s" and User = "%s";`, mysql.SystemDB, mysql.TablePrivTable, user.Hostname, user.Username)
-		if _, err := e.ctx.(sqlexec.SQLExecutor).Execute(context.Background(), sql); err != nil {
+		sql = fmt.Sprintf(`DELETE FROM %s.%s WHERE Host = '%s' and User = '%s';`, mysql.SystemDB, mysql.TablePrivTable, user.Hostname, user.Username)
+		if _, err := sqlExecutor.Execute(context.Background(), sql); err != nil {
 			failedUsers = append(failedUsers, user.String())
-			if _, err := e.ctx.(sqlexec.SQLExecutor).Execute(context.Background(), "rollback"); err != nil {
-				return errors.Trace(err)
+			if _, err := sqlExecutor.Execute(context.Background(), "rollback"); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// delete relationship from mysql.role_edges
+		sql = fmt.Sprintf(`DELETE FROM %s.%s WHERE TO_HOST = '%s' and TO_USER = '%s';`, mysql.SystemDB, mysql.RoleEdgeTable, user.Hostname, user.Username)
+		if _, err := sqlExecutor.Execute(context.Background(), sql); err != nil {
+			failedUsers = append(failedUsers, user.String())
+			if _, err := sqlExecutor.Execute(context.Background(), "rollback"); err != nil {
+				return err
+			}
+			continue
+		}
+
+		sql = fmt.Sprintf(`DELETE FROM %s.%s WHERE FROM_HOST = '%s' and FROM_USER = '%s';`, mysql.SystemDB, mysql.RoleEdgeTable, user.Hostname, user.Username)
+		if _, err := sqlExecutor.Execute(context.Background(), sql); err != nil {
+			failedUsers = append(failedUsers, user.String())
+			if _, err := sqlExecutor.Execute(context.Background(), "rollback"); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// delete relationship from mysql.default_roles
+		sql = fmt.Sprintf(`DELETE FROM %s.%s WHERE DEFAULT_ROLE_HOST = '%s' and DEFAULT_ROLE_USER = '%s';`, mysql.SystemDB, mysql.DefaultRoleTable, user.Hostname, user.Username)
+		if _, err := sqlExecutor.Execute(context.Background(), sql); err != nil {
+			failedUsers = append(failedUsers, user.String())
+			if _, err := sqlExecutor.Execute(context.Background(), "rollback"); err != nil {
+				return err
+			}
+			continue
+		}
+
+		sql = fmt.Sprintf(`DELETE FROM %s.%s WHERE HOST = '%s' and USER = '%s';`, mysql.SystemDB, mysql.DefaultRoleTable, user.Hostname, user.Username)
+		if _, err := sqlExecutor.Execute(context.Background(), sql); err != nil {
+			failedUsers = append(failedUsers, user.String())
+			if _, err := sqlExecutor.Execute(context.Background(), "rollback"); err != nil {
+				return err
 			}
 			continue
 		}
 
 		//TODO: need delete columns_priv once we implement columns_priv functionality.
-		if _, err := e.ctx.(sqlexec.SQLExecutor).Execute(context.Background(), "commit"); err != nil {
+		if _, err := sqlExecutor.Execute(context.Background(), "commit"); err != nil {
 			failedUsers = append(failedUsers, user.String())
 		}
 	}
+
+	if len(notExistUsers) > 0 {
+		if s.IfExists {
+			for _, user := range notExistUsers {
+				e.ctx.GetSessionVars().StmtCtx.AppendNote(infoschema.ErrUserDropExists.GenWithStackByArgs(user))
+			}
+		} else {
+			failedUsers = append(failedUsers, notExistUsers...)
+		}
+	}
+
 	if len(failedUsers) > 0 {
 		return ErrCannotUser.GenWithStackByArgs("DROP USER", strings.Join(failedUsers, ","))
 	}

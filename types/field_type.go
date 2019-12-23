@@ -436,6 +436,17 @@ func hasVariantFieldLength(tp *FieldType) bool {
 	return false
 }
 
+func HasCharset(ft *FieldType) bool {
+	switch ft.Tp {
+	case mysql.TypeVarchar, mysql.TypeString, mysql.TypeVarString, mysql.TypeBlob,
+		mysql.TypeTinyBlob, mysql.TypeMediumBlob, mysql.TypeLongBlob:
+		return !mysql.HasBinaryFlag(ft.Flag)
+	case mysql.TypeEnum, mysql.TypeSet:
+		return true
+	}
+	return false
+}
+
 // DefaultTypeForValue returns the default FieldType for the value.
 func DefaultTypeForValue(value interface{}, tp *FieldType) {
 	switch x := value.(type) {
