@@ -30,12 +30,41 @@ import (
 	"github.com/pingcap/errors"
 )
 
+// PreprocessOpt presents optional parameters to `Preprocess` method.
+type PreprocessOpt func(*preprocessor)
+
+// InPrepare is a PreprocessOpt that indicates preprocess is executing under prepare statement.
+func InPrepare(p *preprocessor) {
+	p.flag |= inPrepare
+}
+
+// InTxnRetry is a PreprocessOpt that indicates preprocess is executing under transaction retry.
+func InTxnRetry(p *preprocessor) {
+	p.flag |= inTxnRetry
+}
+
 // Preprocess resolves table names of the node, and checks some statements validation.
-func Preprocess(ctx sessionctx.Context, node ast.Node, is infoschema.InfoSchema, inPrepare bool) error {
-	v := preprocessor{is: is, ctx: ctx, inPrepare: inPrepare, tableAliasInJoin: make([]map[string]interface{}, 0, 0)}
+func Preprocess(ctx sessionctx.Context, node ast.Node, is infoschema.InfoSchema, preprocessOpt ...PreprocessOpt) error {
+	v := preprocessor{is: is, ctx: ctx, tableAliasInJoin: make([]map[string]interface{}, 0)}
+	for _, optFn := range preprocessOpt {
+		optFn(&v)
+	}
 	node.Accept(&v)
 	return errors.Trace(v.err)
 }
+
+type preprocessorFlag uint8
+
+const (
+	// inPrepare is set when visiting in prepare statement.
+	inPrepare preprocessorFlag = 1 << iota
+	// inTxnRetry is set when visiting in transaction retry.
+	inTxnRetry
+	// inCreateOrDropTable is set when visiting create/drop table statement.
+	inCreateOrDropTable
+	// parentIsJoin is set when visiting node's parent is join.
+	parentIsJoin
+)
 
 // preprocessor is an ast.Visitor that preprocess
 // ast Nodes parsed from parser.
@@ -43,6 +72,7 @@ type preprocessor struct {
 	is        infoschema.InfoSchema
 	ctx       sessionctx.Context
 	err       error
+	flag      preprocessorFlag
 	inPrepare bool
 	// inCreateOrDropTable is true when visiting create/drop table statement.
 	inCreateOrDropTable bool

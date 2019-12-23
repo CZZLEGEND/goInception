@@ -14,11 +14,16 @@
 package util
 
 import (
+	"context"
 	"runtime"
 	"time"
 
+	"github.com/hanchuanchuan/goInception/parser"
+	"github.com/hanchuanchuan/goInception/terror"
+	"github.com/hanchuanchuan/goInception/util/logutil"
 	"github.com/pingcap/errors"
 	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 const (
@@ -26,6 +31,8 @@ const (
 	DefaultMaxRetries = 30
 	// RetryInterval indicates retry interval.
 	RetryInterval uint64 = 500
+	// GCTimeFormat is the format that gc_worker used to store times.
+	GCTimeFormat = "20060102-15:04:05 -0700"
 )
 
 // RunWithRetry will run the f with backoff and retry.
@@ -71,4 +78,35 @@ func WithRecovery(exec func(), recoverFn func(r interface{})) {
 		}
 	}()
 	exec()
+}
+
+const (
+	// syntaxErrorPrefix is the common prefix for SQL syntax error in TiDB.
+	syntaxErrorPrefix = "You have an error in your SQL syntax; check the manual that corresponds to your TiDB version for the right syntax to use"
+)
+
+// SyntaxError converts parser error to TiDB's syntax error.
+func SyntaxError(err error) error {
+	if err == nil {
+		return nil
+	}
+	logutil.Logger(context.Background()).Error("syntax error", zap.Error(err))
+
+	// If the error is already a terror with stack, pass it through.
+	if errors.HasStack(err) {
+		cause := errors.Cause(err)
+		if _, ok := cause.(*terror.Error); ok {
+			return err
+		}
+	}
+
+	return parser.ErrParse.GenWithStackByArgs(syntaxErrorPrefix, err.Error())
+}
+
+// SyntaxWarn converts parser warn to TiDB's syntax warn.
+func SyntaxWarn(err error) error {
+	if err == nil {
+		return nil
+	}
+	return parser.ErrParse.GenWithStackByArgs(syntaxErrorPrefix, err.Error())
 }

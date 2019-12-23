@@ -16,11 +16,14 @@ package testkit
 import (
 	"bytes"
 	"fmt"
+	"github.com/hanchuanchuan/goInception/terror"
 	"sort"
 	"sync/atomic"
 
 	// "github.com/hanchuanchuan/goInception/ast"
+	"github.com/hanchuanchuan/goInception/domain"
 	"github.com/hanchuanchuan/goInception/kv"
+	"github.com/hanchuanchuan/goInception/model"
 	"github.com/hanchuanchuan/goInception/session"
 	"github.com/hanchuanchuan/goInception/util/sqlexec"
 	"github.com/hanchuanchuan/goInception/util/testutil"
@@ -261,13 +264,33 @@ func (tk *TestKit) MustQueryInc(sql string, args ...interface{}) *Result {
 	return tk.ResultSetToResult(rs, comment)
 }
 
+// MustGetErrCode executes a sql statement and assert it's error code.
+func (tk *TestKit) MustGetErrCode(sql string, errCode int) {
+	_, err := tk.Exec(sql)
+	tk.c.Assert(err, check.NotNil)
+	originErr := errors.Cause(err)
+	tErr, ok := originErr.(*terror.Error)
+	tk.c.Assert(ok, check.IsTrue, check.Commentf("expect type 'terror.Error', but obtain '%T'", originErr))
+	sqlErr := tErr.ToSQLError()
+	tk.c.Assert(int(sqlErr.Code), check.Equals, errCode, check.Commentf("Assertion failed, origin err:\n  %v", sqlErr))
+}
+
 // ResultSetToResult converts sqlexec.RecordSet to testkit.Result.
 // It is used to check results of execute statement in binary mode.
 func (tk *TestKit) ResultSetToResult(rs sqlexec.RecordSet, comment check.CommentInterface) *Result {
-	rows, err := session.GetRows4Test(context.Background(), tk.Se, rs)
-	tk.c.Assert(errors.ErrorStack(err), check.Equals, "", comment)
+	return tk.ResultSetToResultWithCtx(context.Background(), rs, comment)
+}
+
+// ResultSetToStringSlice changes the RecordSet to [][]string.
+func ResultSetToStringSlice(ctx context.Context, s session.Session, rs sqlexec.RecordSet) ([][]string, error) {
+	rows, err := session.GetRows4Test(ctx, s, rs)
+	if err != nil {
+		return nil, err
+	}
 	err = rs.Close()
-	tk.c.Assert(errors.ErrorStack(err), check.Equals, "", comment)
+	if err != nil {
+		return nil, err
+	}
 	sRows := make([][]string, len(rows))
 	for i := range rows {
 		row := rows[i]
@@ -278,15 +301,33 @@ func (tk *TestKit) ResultSetToResult(rs sqlexec.RecordSet, comment check.Comment
 			} else {
 				d := row.GetDatum(j, &rs.Fields()[j].Column.FieldType)
 				iRow[j], err = d.ToString()
-				tk.c.Assert(err, check.IsNil)
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 		sRows[i] = iRow
 	}
+	return sRows, nil
+}
+
+// ResultSetToResultWithCtx converts sqlexec.RecordSet to testkit.Result.
+func (tk *TestKit) ResultSetToResultWithCtx(ctx context.Context, rs sqlexec.RecordSet, comment check.CommentInterface) *Result {
+	sRows, err := ResultSetToStringSlice(ctx, tk.Se, rs)
+	tk.c.Check(err, check.IsNil, comment)
 	return &Result{rows: sRows, c: tk.c, comment: comment}
 }
 
 // Rows is similar to RowsWithSep, use white space as separator string.
 func Rows(args ...string) [][]interface{} {
 	return testutil.RowsWithSep(" ", args...)
+}
+
+// GetTableID gets table ID by name.
+func (tk *TestKit) GetTableID(tableName string) int64 {
+	dom := domain.GetDomain(tk.Se)
+	is := dom.InfoSchema()
+	tbl, err := is.TableByName(model.NewCIStr("test"), model.NewCIStr(tableName))
+	tk.c.Assert(err, check.IsNil)
+	return tbl.Meta().ID
 }

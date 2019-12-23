@@ -14,6 +14,7 @@
 package kv
 
 import (
+	"github.com/hanchuanchuan/goInception/config"
 	"github.com/hanchuanchuan/goInception/store/tikv/oracle"
 	"github.com/hanchuanchuan/goInception/util/execdetails"
 	"golang.org/x/net/context"
@@ -64,14 +65,31 @@ const (
 	RC
 )
 
+// ReplicaReadType is the type of replica to read data from
+type ReplicaReadType byte
+
+const (
+	// ReplicaReadLeader stands for 'read from leader'.
+	ReplicaReadLeader ReplicaReadType = 1 << iota
+	// ReplicaReadFollower stands for 'read from follower'.
+	ReplicaReadFollower
+	// ReplicaReadLearner stands for 'read from learner'.
+	ReplicaReadLearner
+)
+
+// IsFollowerRead checks if leader is going to be used to read data.
+func (r ReplicaReadType) IsFollowerRead() bool {
+	return r == ReplicaReadFollower
+}
+
 // Those limits is enforced to make sure the transaction can be well handled by TiKV.
 var (
 	// TxnEntrySizeLimit is limit of single entry size (len(key) + len(value)).
 	TxnEntrySizeLimit = 6 * 1024 * 1024
 	// TxnEntryCountLimit  is limit of number of entries in the MemBuffer.
-	TxnEntryCountLimit uint64 = 300 * 1000
+	TxnEntryCountLimit uint64 = config.DefTxnEntryCountLimit
 	// TxnTotalSizeLimit is limit of the sum of all entry size.
-	TxnTotalSizeLimit = 100 * 1024 * 1024
+	TxnTotalSizeLimit uint64 = config.DefTxnTotalSizeLimit
 )
 
 // Retriever is the interface wraps the basic Get and Seek methods.

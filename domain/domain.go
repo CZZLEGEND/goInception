@@ -24,6 +24,7 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	"github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/hanchuanchuan/goInception/ast"
+	"github.com/hanchuanchuan/goInception/bindinfo"
 	"github.com/hanchuanchuan/goInception/config"
 	"github.com/hanchuanchuan/goInception/ddl"
 	"github.com/hanchuanchuan/goInception/infoschema"
@@ -52,6 +53,7 @@ type Domain struct {
 	store           kv.Storage
 	infoHandle      *infoschema.Handle
 	privHandle      *privileges.Handle
+	bindHandle      *bindinfo.BindHandle
 	statsHandle     unsafe.Pointer
 	statsLease      time.Duration
 	statsUpdating   sync2.AtomicInt32
@@ -655,6 +657,11 @@ func (do *Domain) LoadPrivilegeLoop(ctx sessionctx.Context) error {
 // PrivilegeHandle returns the MySQLPrivilege.
 func (do *Domain) PrivilegeHandle() *privileges.Handle {
 	return do.privHandle
+}
+
+// BindHandle returns domain's bindHandle.
+func (do *Domain) BindHandle() *bindinfo.BindHandle {
+	return do.bindHandle
 }
 
 // StatsHandle returns the statistic handle.

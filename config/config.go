@@ -29,6 +29,10 @@ import (
 // Config number limitations
 const (
 	MaxLogFileSize = 4096 // MB
+	// DefTxnEntryCountLimit is the default value of TxnEntryCountLimit.
+	DefTxnEntryCountLimit = 300 * 1000
+	// DefTxnTotalSizeLimit is the default value of TxnTxnTotalSizeLimit.
+	DefTxnTotalSizeLimit = 100 * 1024 * 1024
 )
 
 // Valid config maps

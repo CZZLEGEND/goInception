@@ -14,6 +14,7 @@
 package planner
 
 import (
+	"context"
 	"github.com/hanchuanchuan/goInception/ast"
 	"github.com/hanchuanchuan/goInception/infoschema"
 	plannercore "github.com/hanchuanchuan/goInception/planner/core"
@@ -24,17 +25,17 @@ import (
 
 // Optimize does optimization and creates a Plan.
 // The node must be prepared first.
-func Optimize(ctx sessionctx.Context, node ast.Node, is infoschema.InfoSchema) (plannercore.Plan, error) {
-	fp := plannercore.TryFastPlan(ctx, node)
+func Optimize(ctx context.Context, sctx sessionctx.Context, node ast.Node, is infoschema.InfoSchema) (plannercore.Plan, error) {
+	fp := plannercore.TryFastPlan(sctx, node)
 	if fp != nil {
 		return fp, nil
 	}
 
 	// build logical plan
-	ctx.GetSessionVars().PlanID = 0
-	ctx.GetSessionVars().PlanColumnID = 0
-	builder := plannercore.NewPlanBuilder(ctx, is)
-	p, err := builder.Build(node)
+	sctx.GetSessionVars().PlanID = 0
+	sctx.GetSessionVars().PlanColumnID = 0
+	builder := plannercore.NewPlanBuilder(sctx, is)
+	p, err := builder.Build(ctx, node)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +43,7 @@ func Optimize(ctx sessionctx.Context, node ast.Node, is infoschema.InfoSchema) (
 	// Check privilege. Maybe it's better to move this to the Preprocess, but
 	// we need the table information to check privilege, which is collected
 	// into the visitInfo in the logical plan builder.
-	if pm := privilege.GetPrivilegeManager(ctx); pm != nil {
+	if pm := privilege.GetPrivilegeManager(sctx); pm != nil {
 		if !plannercore.CheckPrivilege(pm, builder.GetVisitInfo()) {
 			return nil, errors.New("privilege check fail")
 		}
@@ -50,8 +51,8 @@ func Optimize(ctx sessionctx.Context, node ast.Node, is infoschema.InfoSchema) (
 
 	// Handle the execute statement.
 	if execPlan, ok := p.(*plannercore.Execute); ok {
-		err := execPlan.OptimizePreparedPlan(ctx, is)
-		return p, errors.Trace(err)
+		err := execPlan.OptimizePreparedPlan(ctx, sctx, is)
+		return p, err
 	}
 
 	// Handle the non-logical plan statement.
@@ -61,7 +62,7 @@ func Optimize(ctx sessionctx.Context, node ast.Node, is infoschema.InfoSchema) (
 	}
 
 	// Handle the logical plan statement, use cascades planner if enabled.
-	if ctx.GetSessionVars().EnableCascadesPlanner {
+	if sctx.GetSessionVars().EnableCascadesPlanner {
 		return nil, errors.New("the cascades planner is not implemented yet")
 	}
 	return plannercore.DoOptimize(builder.GetOptFlag(), logic)

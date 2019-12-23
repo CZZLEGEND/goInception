@@ -26,6 +26,7 @@ import (
 	"github.com/hanchuanchuan/goInception/sessionctx"
 	"github.com/hanchuanchuan/goInception/sessionctx/variable"
 	driver "github.com/hanchuanchuan/goInception/types/parser_driver"
+	"github.com/hanchuanchuan/goInception/util"
 	"github.com/hanchuanchuan/goInception/util/chunk"
 	"github.com/hanchuanchuan/goInception/util/sqlexec"
 	"github.com/pingcap/errors"
@@ -112,20 +113,32 @@ func (e *PrepareExec) Next(ctx context.Context, chk *chunk.Chunk) error {
 	if sqlParser, ok := e.ctx.(sqlexec.SQLParser); ok {
 		stmts, err = sqlParser.ParseSQL(e.sqlText, charset, collation)
 	} else {
-		stmts, _, err = parser.New().Parse(e.sqlText, charset, collation)
+		p := parser.New()
+		p.EnableWindowFunc(vars.EnableWindowFunction)
+		var warns []error
+		stmts, warns, err = p.Parse(e.sqlText, charset, collation)
+		for _, warn := range warns {
+			e.ctx.GetSessionVars().StmtCtx.AppendWarning(util.SyntaxWarn(warn))
+		}
 	}
 	if err != nil {
-		return errors.Trace(err)
+		return util.SyntaxError(err)
 	}
 	if len(stmts) != 1 {
 		return ErrPrepareMulti
 	}
 	stmt := stmts[0]
-	if _, ok := stmt.(ast.DDLNode); ok {
-		return ErrPrepareDDL
+	err = ResetContextOfStmt(e.ctx, stmt)
+	if err != nil {
+		return err
 	}
 	var extractor paramMarkerExtractor
 	stmt.Accept(&extractor)
+
+	// DDL Statements can not accept parameters
+	if _, ok := stmt.(ast.DDLNode); ok && len(extractor.markers) > 0 {
+		return ErrPrepareDDL
+	}
 
 	// Prepare parameters should NOT over 2 bytes(MaxUint16)
 	// https://dev.mysql.com/doc/internals/en/com-stmt-prepare-response.html#packet-COM_STMT_PREPARE_OK.
@@ -133,7 +146,7 @@ func (e *PrepareExec) Next(ctx context.Context, chk *chunk.Chunk) error {
 		return ErrPsManyParam
 	}
 
-	err = plannercore.Preprocess(e.ctx, stmt, e.is, true)
+	err = plannercore.Preprocess(e.ctx, stmt, e.is, plannercore.InPrepare)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -161,7 +174,7 @@ func (e *PrepareExec) Next(ctx context.Context, chk *chunk.Chunk) error {
 		param.InExecute = false
 	}
 	var p plannercore.Plan
-	p, err = plannercore.BuildLogicalPlan(e.ctx, stmt, e.is)
+	p, err = plannercore.BuildLogicalPlan(ctx, e.ctx, stmt, e.is)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -241,28 +254,28 @@ func (e *DeallocateExec) Next(ctx context.Context, chk *chunk.Chunk) error {
 }
 
 // CompileExecutePreparedStmt compiles a session Execute command to a stmt.Statement.
-func CompileExecutePreparedStmt(ctx sessionctx.Context, ID uint32, args ...interface{}) (sqlexec.Statement, error) {
+func CompileExecutePreparedStmt(ctx context.Context, sctx sessionctx.Context, ID uint32, args ...interface{}) (sqlexec.Statement, error) {
 	execStmt := &ast.ExecuteStmt{ExecID: ID}
-	if err := ResetContextOfStmt(ctx, execStmt); err != nil {
+	if err := ResetContextOfStmt(sctx, execStmt); err != nil {
 		return nil, err
 	}
 	execStmt.UsingVars = make([]ast.ExprNode, len(args))
 	for i, val := range args {
 		execStmt.UsingVars[i] = ast.NewValueExpr(val)
 	}
-	is := GetInfoSchema(ctx)
-	execPlan, err := planner.Optimize(ctx, execStmt, is)
+	is := GetInfoSchema(sctx)
+	execPlan, err := planner.Optimize(ctx, sctx, execStmt, is)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, err
 	}
 
 	stmt := &ExecStmt{
-		InfoSchema: GetInfoSchema(ctx),
+		InfoSchema: is,
 		Plan:       execPlan,
 		StmtNode:   execStmt,
-		Ctx:        ctx,
+		Ctx:        sctx,
 	}
-	if prepared, ok := ctx.GetSessionVars().PreparedStmts[ID]; ok {
+	if prepared, ok := sctx.GetSessionVars().PreparedStmts[ID]; ok {
 		stmt.Text = prepared.Stmt.Text()
 	}
 	return stmt, nil

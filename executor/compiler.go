@@ -15,10 +15,15 @@ package executor
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/hanchuanchuan/goInception/ast"
+	"github.com/hanchuanchuan/goInception/bindinfo"
 	"github.com/hanchuanchuan/goInception/config"
+	"github.com/hanchuanchuan/goInception/domain"
 	"github.com/hanchuanchuan/goInception/infoschema"
+	"github.com/hanchuanchuan/goInception/metrics"
+	"github.com/hanchuanchuan/goInception/parser"
 	"github.com/hanchuanchuan/goInception/planner"
 	plannercore "github.com/hanchuanchuan/goInception/planner/core"
 	"github.com/hanchuanchuan/goInception/sessionctx"
@@ -34,17 +39,24 @@ type Compiler struct {
 
 // Compile compiles an ast.StmtNode to a physical plan.
 func (c *Compiler) Compile(ctx context.Context, stmtNode ast.StmtNode) (*ExecStmt, error) {
+	return c.compile(ctx, stmtNode, false)
+}
+func (c *Compiler) compile(ctx context.Context, stmtNode ast.StmtNode, skipBind bool) (*ExecStmt, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span1 := opentracing.StartSpan("executor.Compile", opentracing.ChildOf(span.Context()))
 		defer span1.Finish()
 	}
 
+	if !skipBind {
+		stmtNode = addHint(c.Ctx, stmtNode)
+	}
+
 	infoSchema := GetInfoSchema(c.Ctx)
-	if err := plannercore.Preprocess(c.Ctx, stmtNode, infoSchema, false); err != nil {
+	if err := plannercore.Preprocess(c.Ctx, stmtNode, infoSchema); err != nil {
 		return nil, err
 	}
 
-	finalPlan, err := planner.Optimize(c.Ctx, stmtNode, infoSchema)
+	finalPlan, err := planner.Optimize(ctx, c.Ctx, stmtNode, infoSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -198,4 +210,51 @@ func GetInfoSchema(ctx sessionctx.Context) infoschema.InfoSchema {
 		is = sessVar.TxnCtx.InfoSchema.(infoschema.InfoSchema)
 	}
 	return is
+}
+
+func addHint(ctx sessionctx.Context, stmtNode ast.StmtNode) ast.StmtNode {
+	if ctx.Value(bindinfo.SessionBindInfoKeyType) == nil { //when the domain is initializing, the bind will be nil.
+		return stmtNode
+	}
+	switch x := stmtNode.(type) {
+	case *ast.ExplainStmt:
+		switch x.Stmt.(type) {
+		case *ast.SelectStmt:
+			normalizeExplainSQL := parser.Normalize(x.Text())
+			idx := strings.Index(normalizeExplainSQL, "select")
+			normalizeSQL := normalizeExplainSQL[idx:]
+			hash := parser.DigestHash(normalizeSQL)
+			x.Stmt = addHintForSelect(hash, normalizeSQL, ctx, x.Stmt)
+		}
+		return x
+	case *ast.SelectStmt:
+		normalizeSQL, hash := parser.NormalizeDigest(x.Text())
+		return addHintForSelect(hash, normalizeSQL, ctx, x)
+	default:
+		return stmtNode
+	}
+}
+
+func addHintForSelect(hash, normdOrigSQL string, ctx sessionctx.Context, stmt ast.StmtNode) ast.StmtNode {
+	sessionHandle := ctx.Value(bindinfo.SessionBindInfoKeyType).(*bindinfo.SessionHandle)
+	bindRecord := sessionHandle.GetBindRecord(normdOrigSQL, ctx.GetSessionVars().CurrentDB)
+	if bindRecord != nil {
+		if bindRecord.Status == bindinfo.Invalid {
+			return stmt
+		}
+		if bindRecord.Status == bindinfo.Using {
+			metrics.BindUsageCounter.WithLabelValues(metrics.ScopeSession).Inc()
+			return bindinfo.BindHint(stmt, bindRecord.Ast)
+		}
+	}
+	globalHandle := domain.GetDomain(ctx).BindHandle()
+	bindRecord = globalHandle.GetBindRecord(hash, normdOrigSQL, ctx.GetSessionVars().CurrentDB)
+	if bindRecord == nil {
+		bindRecord = globalHandle.GetBindRecord(hash, normdOrigSQL, "")
+	}
+	if bindRecord != nil {
+		metrics.BindUsageCounter.WithLabelValues(metrics.ScopeGlobal).Inc()
+		return bindinfo.BindHint(stmt, bindRecord.Ast)
+	}
+	return stmt
 }

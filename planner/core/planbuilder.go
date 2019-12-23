@@ -14,6 +14,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -189,7 +190,7 @@ func NewPlanBuilder(sctx sessionctx.Context, is infoschema.InfoSchema) *PlanBuil
 }
 
 // Build builds the ast node to a Plan.
-func (b *PlanBuilder) Build(node ast.Node) (Plan, error) {
+func (b *PlanBuilder) Build(ctx context.Context, node ast.Node) (Plan, error) {
 	b.optFlag = flagPrunColumns
 	switch x := node.(type) {
 	case *ast.AdminStmt:
@@ -201,11 +202,11 @@ func (b *PlanBuilder) Build(node ast.Node) (Plan, error) {
 	case *ast.ExecuteStmt:
 		return b.buildExecute(x)
 	case *ast.ExplainStmt:
-		return b.buildExplain(x)
+		return b.buildExplain(ctx, x)
 	case *ast.TraceStmt:
 		return b.buildTrace(x)
 	case *ast.InsertStmt:
-		return b.buildInsert(x)
+		return b.buildInsert(ctx, x)
 	case *ast.LoadDataStmt:
 		return b.buildLoadData(x)
 	case *ast.LoadStatsStmt:
@@ -1097,7 +1098,7 @@ func (b *PlanBuilder) resolveGeneratedColumns(columns []*table.Column, onDups ma
 	return igc, nil
 }
 
-func (b *PlanBuilder) buildInsert(insert *ast.InsertStmt) (Plan, error) {
+func (b *PlanBuilder) buildInsert(ctx context.Context, insert *ast.InsertStmt) (Plan, error) {
 	ts, ok := insert.Table.TableRefs.Left.(*ast.TableSource)
 	if !ok {
 		return nil, infoschema.ErrTableNotExists.GenWithStackByArgs()
@@ -1155,7 +1156,7 @@ func (b *PlanBuilder) buildInsert(insert *ast.InsertStmt) (Plan, error) {
 		}
 	} else {
 		// Branch for `INSERT ... SELECT ...`.
-		err := b.buildSelectPlanOfInsert(insert, insertPlan)
+		err := b.buildSelectPlanOfInsert(ctx, insert, insertPlan)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -1342,12 +1343,12 @@ func (b *PlanBuilder) buildValuesListOfInsert(insert *ast.InsertStmt, insertPlan
 	return nil
 }
 
-func (b *PlanBuilder) buildSelectPlanOfInsert(insert *ast.InsertStmt, insertPlan *Insert) error {
+func (b *PlanBuilder) buildSelectPlanOfInsert(ctx context.Context, insert *ast.InsertStmt, insertPlan *Insert) error {
 	affectedValuesCols, err := b.getAffectCols(insert, insertPlan)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	selectPlan, err := b.Build(insert.Select)
+	selectPlan, err := b.Build(ctx, insert.Select)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1522,11 +1523,11 @@ func (b *PlanBuilder) buildTrace(trace *ast.TraceStmt) (Plan, error) {
 	return p, nil
 }
 
-func (b *PlanBuilder) buildExplain(explain *ast.ExplainStmt) (Plan, error) {
+func (b *PlanBuilder) buildExplain(ctx context.Context, explain *ast.ExplainStmt) (Plan, error) {
 	if show, ok := explain.Stmt.(*ast.ShowStmt); ok {
 		return b.buildShow(show)
 	}
-	targetPlan, err := OptimizeAstNode(b.ctx, explain.Stmt, b.is)
+	targetPlan, err := OptimizeAstNode(ctx, b.ctx, explain.Stmt, b.is)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

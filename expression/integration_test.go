@@ -882,8 +882,8 @@ func (s *testIntegrationSuite) TestStringBuiltin(c *C) {
 	result.Check(testkit.Rows("'121' '0' '中文' <nil>"))
 
 	// for convert
-	result = tk.MustQuery(`select convert("123" using "866"), convert("123" using "binary"), convert("中文" using "binary"), convert("中文" using "utf8"), convert("中文" using "utf8mb4"), convert(cast("中文" as binary) using "utf8");`)
-	result.Check(testkit.Rows("123 123 中文 中文 中文 中文"))
+	result = tk.MustQuery(`select convert("123" using "binary"), convert("中文" using "binary"), convert("中文" using "utf8"), convert("中文" using "utf8mb4"), convert(cast("中文" as binary) using "utf8");`)
+	result.Check(testkit.Rows("123 中文 中文 中文 中文"))
 
 	// for insert
 	result = tk.MustQuery(`select insert("中文", 1, 1, cast("aaa" as binary)), insert("ba", -1, 1, "aaa"), insert("ba", 1, 100, "aaa"), insert("ba", 100, 1, "aaa");`)
@@ -1107,8 +1107,9 @@ func (s *testIntegrationSuite) TestTimeBuiltin(c *C) {
 	_, err := tk.Exec(`insert into t select year("aa")`)
 	c.Assert(err, NotNil)
 	c.Assert(terror.ErrorEqual(err, types.ErrInvalidTimeFormat), IsTrue, Commentf("err %v", err))
+	tk.MustExec(`set sql_mode='STRICT_TRANS_TABLES'`) // without zero date
 	tk.MustExec(`insert into t select year("0000-00-00 00:00:00")`)
-	tk.MustExec(`set sql_mode="NO_ZERO_DATE";`)
+	tk.MustExec(`set sql_mode="NO_ZERO_DATE";`) // with zero date
 	tk.MustExec(`insert into t select year("0000-00-00 00:00:00")`)
 	tk.MustQuery("show warnings").Check(testutil.RowsWithSep("|", "Warning|1292|Incorrect datetime value: '0000-00-00 00:00:00.000000'"))
 	tk.MustExec(`set sql_mode="NO_ZERO_DATE,STRICT_TRANS_TABLES";`)
@@ -1934,6 +1935,60 @@ func (s *testIntegrationSuite) TestBuiltin(c *C) {
 
 	result = tk.MustQuery(`select cast(20170118.999 as datetime);`)
 	result.Check(testkit.Rows("2017-01-18 00:00:00"))
+	tk.MustQuery(`select convert(a2.a, unsigned int) from (select cast('"9223372036854775808"' as json) as a) as a2;`)
+
+	tk.MustExec(`create table tb5(a bigint(64) unsigned, b double);`)
+	tk.MustExec(`insert into tb5 (a, b) values (9223372036854776000, 9223372036854776000);`)
+	tk.MustExec(`insert into tb5 (a, b) select * from (select cast(a as json) as a1, b from tb5) as t where t.a1 = t.b;`)
+	tk.MustExec(`drop table tb5;`)
+
+	tk.MustExec(`create table tb5(a float(64));`)
+	tk.MustExec(`insert into tb5(a) values (13835058055282163712);`)
+	err := tk.QueryToErr(`select convert(t.a1, signed int) from (select convert(a, json) as a1 from tb5) as t`)
+	msg := strings.Split(err.Error(), " ")
+	last := msg[len(msg)-1]
+	c.Assert(last, Equals, "bigint", Commentf("%#v", err.Error()))
+	tk.MustExec(`drop table tb5;`)
+
+	// test builtinCastIntAsDecimalSig
+	tk.MustExec(`create table tb5(a bigint(64) unsigned, b decimal(64, 10));`)
+	tk.MustExec(`insert into tb5 (a, b) values (9223372036854775808, 9223372036854775808);`)
+	tk.MustExec(`insert into tb5 (select * from tb5 where a = b);`)
+	result = tk.MustQuery(`select * from tb5;`)
+	result.Check(testkit.Rows("9223372036854775808 9223372036854775808.0000000000", "9223372036854775808 9223372036854775808.0000000000"))
+	tk.MustExec(`drop table tb5;`)
+
+	// test builtinCastIntAsRealSig
+	tk.MustExec(`create table tb5(a bigint(64) unsigned, b double(64, 10));`)
+	tk.MustExec(`insert into tb5 (a, b) values (13835058000000000000, 13835058000000000000);`)
+	tk.MustExec(`insert into tb5 (select * from tb5 where a = b);`)
+	result = tk.MustQuery(`select * from tb5;`)
+	result.Check(testkit.Rows("13835058000000000000 13835058000000000000", "13835058000000000000 13835058000000000000"))
+	tk.MustExec(`drop table tb5;`)
+
+	// test builtinCastIntAsStringSig
+	tk.MustExec(`create table tb5(a bigint(64) unsigned,b varchar(50));`)
+	tk.MustExec(`insert into tb5(a, b) values (9223372036854775808, '9223372036854775808');`)
+	tk.MustExec(`insert into tb5(select * from tb5 where a = b);`)
+	result = tk.MustQuery(`select * from tb5;`)
+	result.Check(testkit.Rows("9223372036854775808 9223372036854775808", "9223372036854775808 9223372036854775808"))
+	tk.MustExec(`drop table tb5;`)
+
+	// test builtinCastIntAsDecimalSig
+	tk.MustExec(`drop table if exists tb5`)
+	tk.MustExec(`create table tb5 (a decimal(65), b bigint(64) unsigned);`)
+	tk.MustExec(`insert into tb5 (a, b) values (9223372036854775808, 9223372036854775808);`)
+	result = tk.MustQuery(`select cast(b as decimal(64)) from tb5 union all select b from tb5;`)
+	result.Check(testkit.Rows("9223372036854775808", "9223372036854775808"))
+	tk.MustExec(`drop table tb5`)
+
+	// test builtinCastIntAsRealSig
+	tk.MustExec(`drop table if exists tb5`)
+	tk.MustExec(`create table tb5 (a bigint(64) unsigned, b double(64, 10));`)
+	tk.MustExec(`insert into tb5 (a, b) values (9223372036854775808, 9223372036854775808);`)
+	result = tk.MustQuery(`select a from tb5 where a = b union all select b from tb5;`)
+	result.Check(testkit.Rows("9223372036854776000", "9223372036854776000"))
+	tk.MustExec(`drop table tb5`)
 
 	// Test corner cases of cast string as datetime
 	result = tk.MustQuery(`select cast("170102034" as datetime);`)
@@ -2093,7 +2148,7 @@ func (s *testIntegrationSuite) TestBuiltin(c *C) {
 	result.Check(testkit.Rows("99999.99"))
 	result = tk.MustQuery("select cast(s1 as decimal(8, 2)) from t1;")
 	result.Check(testkit.Rows("111111.00"))
-	_, err := tk.Exec("insert into t1 values(cast('111111.00' as decimal(7, 2)));")
+	_, err = tk.Exec("insert into t1 values(cast('111111.00' as decimal(7, 2)));")
 	c.Assert(err, NotNil)
 
 	result = tk.MustQuery(`select CAST(0x8fffffffffffffff as signed) a,

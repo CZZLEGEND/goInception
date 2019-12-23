@@ -2636,10 +2636,18 @@ func (b *builtinQuoteSig) Clone() builtinFunc {
 // See https://dev.mysql.com/doc/refman/5.7/en/string-functions.html#function_quote
 func (b *builtinQuoteSig) evalString(row chunk.Row) (string, bool, error) {
 	str, isNull, err := b.args[0].EvalString(b.ctx, row)
-	if isNull || err != nil {
-		return "", true, errors.Trace(err)
+	if err != nil {
+		return "", true, err
+	} else if isNull {
+		// If the argument is NULL, the return value is the word "NULL" without enclosing single quotation marks. see ref.
+		return "NULL", false, err
 	}
 
+	return Quote(str), false, nil
+}
+
+// Quote produce a result that can be used as a properly escaped data value in an SQL statement.
+func Quote(str string) string {
 	runes := []rune(str)
 	buffer := bytes.NewBufferString("")
 	buffer.WriteRune('\'')
@@ -2660,7 +2668,7 @@ func (b *builtinQuoteSig) evalString(row chunk.Row) (string, bool, error) {
 	}
 	buffer.WriteRune('\'')
 
-	return buffer.String(), false, nil
+	return buffer.String()
 }
 
 type binFunctionClass struct {

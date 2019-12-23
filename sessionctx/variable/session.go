@@ -293,8 +293,17 @@ type SessionVars struct {
 	// EnableCascadesPlanner enables the cascades planner.
 	EnableCascadesPlanner bool
 
+	// EnableWindowFunction enables the window function.
+	EnableWindowFunction bool
+
 	// DDLReorgPriority is the operation priority of adding indices.
 	DDLReorgPriority int
+
+	// WaitSplitRegionFinish defines the split region behaviour is sync or async.
+	WaitSplitRegionFinish bool
+
+	// WaitSplitRegionTimeout defines the split region timeout.
+	WaitSplitRegionTimeout uint64
 
 	// EnableStreaming indicates whether the coprocessor request can use streaming API.
 	// TODO: remove this after tidb-server configuration "enable-streaming' removed.
@@ -314,6 +323,84 @@ type SessionVars struct {
 
 	// CommandValue indicates which command current session is doing.
 	CommandValue uint32
+	// TiDBOptJoinReorderThreshold defines the minimal number of join nodes
+	// to use the greedy join reorder algorithm.
+	TiDBOptJoinReorderThreshold int
+
+	// SlowQueryFile indicates which slow query log file for SLOW_QUERY table to parse.
+	SlowQueryFile string
+
+	// EnableFastAnalyze indicates whether to take fast analyze.
+	EnableFastAnalyze bool
+
+	// TxnMode indicates should be pessimistic or optimistic.
+	TxnMode string
+
+	// LowResolutionTSO is used for reading data with low resolution TSO which is updated once every two seconds.
+	LowResolutionTSO bool
+
+	// MaxExecutionTime is the timeout for select statement, in milliseconds.
+	// If the value is 0, timeouts are not enabled.
+	// See https://dev.mysql.com/doc/refman/5.7/en/server-system-variables.html#sysvar_max_execution_time
+	MaxExecutionTime uint64
+
+	// Killed is a flag to indicate that this query is killed.
+	Killed uint32
+
+	// ConnectionInfo indicates current connection info used by current session, only be lazy assigned by plugin.
+	ConnectionInfo *ConnectionInfo
+
+	// ReplicaRead is used for reading data from replicas, only follower is supported at this time.
+	ReplicaRead kv.ReplicaReadType
+
+	// StartTime is the start time of the last query.
+	StartTime time.Time
+
+	// DurationParse is the duration of parsing SQL string to AST of the last query.
+	DurationParse time.Duration
+
+	// DurationCompile is the duration of compiling AST to execution plan of the last query.
+	DurationCompile time.Duration
+
+	// PrevStmt is used to store the previous executed statement in the current session.
+	PrevStmt fmt.Stringer
+
+	// AllowRemoveAutoInc indicates whether a user can drop the auto_increment column attribute or not.
+	AllowRemoveAutoInc bool
+
+	// LockWaitTimeout is the duration waiting for pessimistic lock in milliseconds
+	// negative value means nowait, 0 means default behavior, others means actual wait time
+	LockWaitTimeout int64
+}
+
+// PreparedParams contains the parameters of the current prepared statement when executing it.
+type PreparedParams []types.Datum
+
+func (pps PreparedParams) String() string {
+	if len(pps) == 0 {
+		return ""
+	}
+	return " [arguments: " + types.DatumsToStrNoErr(pps) + "]"
+}
+
+// ConnectionInfo present connection used by audit.
+type ConnectionInfo struct {
+	ConnectionID      uint32
+	ConnectionType    string
+	Host              string
+	ClientIP          string
+	ClientPort        string
+	ServerID          int
+	ServerPort        int
+	Duration          float64
+	User              string
+	ServerOSLoginUser string
+	OSVersion         string
+	ClientVersion     string
+	ServerVersion     string
+	SSLVersion        string
+	PID               int
+	DB                string
 }
 
 // NewSessionVars creates a session vars object.
